@@ -16,8 +16,8 @@ libhisi_sec.so: drv/hisi_sec.o drv/hisi_qm_udrv.o
 test/hisi_sec_test/test_hisi_sec.o: test/hisi_sec_test/test_hisi_sec.c
 	$(CC) $(INCLUDES) -c $< -o $@ -L. -lwd_crypto
 
-test_hisi_sec: test/hisi_sec_test/test_hisi_sec.o test/sched_sample.o libwd.so libwd_crypto.so libhisi_sec.so
-	$(CC) -o $@ $? -L. -lwd -lwd_crypto -lhisi_sec -lpthread
+test_hisi_sec: test/hisi_sec_test/test_hisi_sec.o test/sched_sample.o libwd.so libwd_crypto.so
+	$(CC) -o $@ $? -L. -lwd -lwd_crypto -lpthread
 
 %.o: %.c
 	$(CC) $(INCLUDES) -fPIC -c $< -o $@
