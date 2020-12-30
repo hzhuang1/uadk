@@ -2,7 +2,10 @@
 #ifndef __WD_CIPHER_H
 #define __WD_CIPHER_H
 
+#define WD_CIPHER_PERF
+
 #include <dlfcn.h>
+#include <sys/time.h>
 #include "wd.h"
 #include "wd_alg_common.h"
 
@@ -96,6 +99,9 @@ struct wd_cipher_req {
 	__u8			data_fmt;
 	wd_alg_cipher_cb_t	*cb;
 	void			*cb_param;
+#ifdef WD_CIPHER_PERF
+	struct timeval		cv[5];
+#endif
 };
 
 /**

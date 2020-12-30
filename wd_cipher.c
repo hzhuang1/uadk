@@ -312,6 +312,9 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	struct sched_key key;
 	__u64 recv_cnt = 0;
 	int index, ret;
+#ifdef WD_CIPHER_PERF
+	struct timeval old, new, wait;
+#endif
 
 	if (unlikely(!sess || !req)) {
 		WD_ERR("cipher input sess or req is NULL.\n");
@@ -323,6 +326,12 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 		return -EINVAL;
 	}
 
+#ifdef WD_CIPHER_PERF
+	timerclear(&old);
+	timerclear(&new);
+	timerclear(&wait);
+	gettimeofday(&old, NULL);
+#endif
 	key.mode = CTX_MODE_SYNC;
 	key.type = 0;
 	key.numa_id = sess->numa;
@@ -336,12 +345,22 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
                 WD_ERR("failed to check ctx mode!\n");
                 return -EINVAL;
         }
+#ifdef WD_CIPHER_PERF
+	gettimeofday(&new, NULL);
+	timersub(&new, &old, &req->cv[0]);
+	memcpy(&old, &new, sizeof(struct timeval));
+#endif
 
 	memset(&msg, 0, sizeof(struct wd_cipher_msg));
 	fill_request_msg(&msg, req, sess);
 	req->state = 0;
 
 	pthread_spin_lock(&ctx->lock);
+#ifdef WD_CIPHER_PERF
+	gettimeofday(&new, NULL);
+	timersub(&new, &old, &req->cv[1]);
+	memcpy(&old, &new, sizeof(struct timeval));
+#endif
 
 	ret = wd_cipher_setting.driver->cipher_send(ctx->ctx, &msg);
 	if (ret < 0) {
@@ -349,9 +368,23 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 		WD_ERR("wd cipher send err!\n");
 		return ret;
 	}
+#ifdef WD_CIPHER_PERF
+	gettimeofday(&new, NULL);
+	timersub(&new, &old, &req->cv[2]);
+	memcpy(&old, &new, sizeof(struct timeval));
+#endif
 
 	do {
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx, &msg);
+#ifdef WD_CIPHER_PERF
+		gettimeofday(&new, NULL);
+		if (ret) {
+			/* accumulate wait time */
+			timersub(&new, &old, &old);
+			timeradd(&wait, &old, &wait);
+			memcpy(&old, &new, sizeof(struct timeval));
+		}
+#endif
 		if (ret == -WD_HW_EACCESS) {
 			WD_ERR("wd cipher recv err!\n");
 			goto recv_err;
@@ -364,6 +397,11 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 		}
 	} while (ret < 0);
 	pthread_spin_unlock(&ctx->lock);
+#ifdef WD_CIPHER_PERF
+	memcpy(&req->cv[3], &wait, sizeof(struct timeval));
+	gettimeofday(&new, NULL);
+	timersub(&new, &old, &req->cv[4]);
+#endif
 
 	return 0;
 recv_err:
@@ -410,7 +448,7 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	idx = wd_get_msg_from_pool(&wd_cipher_setting.pool, index,
 				   (void **)&msg);
 	if (idx < 0) {
-		WD_ERR("busy, failed to get msg from pool!\n");
+		//WD_ERR("busy, failed to get msg from pool!\n");
 		return -EBUSY;
 	}
 

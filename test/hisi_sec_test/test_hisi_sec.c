@@ -72,6 +72,9 @@ typedef struct _thread_data_t {
 	struct timeval start_tval;
 	unsigned long long send_task_num;
 	unsigned long long recv_task_num;
+#ifdef WD_CIPHER_PERF
+	struct timeval sv[5];
+#endif
 } thread_data_t;
 
 typedef struct wd_thread_res {
@@ -3169,7 +3172,6 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	gettimeofday(&start_tval, NULL);
 	for (i = 0; i < thread_num; i++) {
 		thr_data[i].tid = i;
 		thr_data[i].req = &reqs[i];
@@ -3188,6 +3190,8 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 		return ret;
 	}
 	pthread_attr_destroy(&attr);
+
+	gettimeofday(&start_tval, NULL);
 	for (i = 0; i < thread_num; i++) {
 		ret = pthread_join(system_test_thrds[i], NULL);
 		if (ret) {
@@ -3225,7 +3229,15 @@ static void *sva_sec_cipher_sync(void *arg)
 	int cnt = g_times;
 	int ret;
 	int j;
+#ifdef WD_CIPHER_PERF
+	struct timeval sv[5];
+	int sc;
+#endif
 
+#ifdef WD_CIPHER_PERF
+	for (j = 0; j < 5; j++)
+		timerclear(&sv[j]);
+#endif
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
 	h_sess = wd_cipher_alloc_sess(setup);
@@ -3247,7 +3259,16 @@ static void *sva_sec_cipher_sync(void *arg)
 		cnt--;
 		pdata->send_task_num++;
 		count++;
+#ifdef WD_CIPHER_PERF
+		for (sc = 0; sc < 5; sc++) {
+			timeradd(&sv[sc], &req->cv[sc], &sv[sc]);
+		}
+#endif
 	}
+#ifdef WD_CIPHER_PERF
+	for (sc = 0; sc < 5; sc++)
+		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timeval));
+#endif
 
 out:
 	wd_cipher_free_sess(h_sess);
@@ -3292,6 +3313,30 @@ static int sva_sync_create_threads(int thread_num, struct wd_cipher_req *reqs,
 	}
 
 	gettimeofday(&cur_tval, NULL);
+
+#ifdef WD_CIPHER_PERF
+	for (i = 0; i < thread_num; i++) {
+		SEC_TST_PRT("Average data of thread %d, P CTX:%0.0f ns, "
+			"LOCK:%0.0f ns, SEND:%0.0f ns, WAIT:%0.0f ns, "
+			"RECV:%0.0f ns\n",
+			i,
+			(double)((thr_data[i].sv[0].tv_sec * 1000000 \
+			+ thr_data[i].sv[0].tv_usec) * 1000 / \
+			g_times),
+			(double)((thr_data[i].sv[1].tv_sec * 1000000 \
+			+ thr_data[i].sv[1].tv_usec) * 1000 / \
+			g_times),
+			(double)((thr_data[i].sv[2].tv_sec * 1000000 \
+			+ thr_data[i].sv[2].tv_usec) * 1000 / \
+			g_times),
+			(double)((thr_data[i].sv[3].tv_sec * 1000000 \
+			+ thr_data[i].sv[3].tv_usec) * 1000 / \
+			g_times),
+			(double)((thr_data[i].sv[4].tv_sec * 1000000 \
+			+ thr_data[i].sv[4].tv_usec) * 1000 / \
+			g_times));
+	}
+#endif
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
 				cur_tval.tv_usec - start_tval.tv_usec);
 	SEC_TST_PRT("time_used:%0.0f us, send task num:%llu\n", time_used, g_times * g_thread_num);
