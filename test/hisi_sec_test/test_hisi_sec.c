@@ -113,6 +113,10 @@ static pthread_mutex_t test_sec_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t system_test_thrds[THREADS_NUM];
 static thread_data_t thr_data[THREADS_NUM];
 
+#ifdef WD_CIPHER_PERF
+static struct timeval async_sv[2];
+#endif
+
 static void hexdump(char *buff, unsigned int len)
 {
 	unsigned int i;
@@ -595,6 +599,13 @@ static void *async_cb(struct wd_cipher_req *req, void *data)
 {
 	// struct wd_cipher_req *req = (struct wd_cipher_req *)data;
 	// memcpy(&g_async_req, req, sizeof(struct wd_cipher_req));
+#ifdef WD_CIPHER_PERF
+	int sc;
+
+	for (sc = 0; sc < 2; sc++) {
+		timeradd(&async_sv[sc], &req->cv[2 + sc], &async_sv[sc]);
+	}
+#endif
 
 	return NULL;
 }
@@ -3092,7 +3103,15 @@ static void *sva_sec_cipher_async(void *arg)
 	handle_t h_sess;
 	int ret;
 	int j;
+#ifdef WD_CIPHER_PERF
+	struct timeval sv[2];
+	int sc;
+#endif
 
+#ifdef WD_CIPHER_PERF
+	for (j = 0; j < 2; j++)
+		timerclear(&sv[j]);
+#endif
 	/* get resource */
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
@@ -3122,7 +3141,16 @@ try_do_again:
 		}
 		cnt--;
 		count++; // count means data block numbers
+#ifdef WD_CIPHER_PERF
+		for (sc = 0; sc < 2; sc++) {
+			timeradd(&sv[sc], &req->cv[sc], &sv[sc]);
+		}
+#endif
 	} while (cnt);
+#ifdef WD_CIPHER_PERF
+	for (sc = 0; sc < 2; sc++)
+		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timeval));
+#endif
 
 	ret = 0;
 out:
@@ -3138,7 +3166,14 @@ static void *sva_poll_func(void *arg)
 	int ret;
 
 	int expt = g_times * g_thread_num;
+#ifdef WD_CIPHER_PERF
+	int sc;
+#endif
 
+#ifdef WD_CIPHER_PERF
+	for (sc = 0; sc < 2; sc++)
+		timerclear(&async_sv[sc]);
+#endif
 	while (1) {
 		ret = wd_cipher_poll(1, &count);
 		if (ret < 0 && ret != -EAGAIN) {
@@ -3206,6 +3241,24 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 		return ret;
 	}
 
+#ifdef WD_CIPHER_PERF
+	for (i = 0; i < thread_num; i++) {
+		SEC_TST_PRT("Average data of thread %d, P CTX:%0.0f ns, "
+			"SEND:%0.0f ns\n",
+			i,
+			(double)((thr_data[i].sv[0].tv_sec * 1000000 \
+			+ thr_data[i].sv[0].tv_usec) * 1000 / \
+			g_times),
+			(double)((thr_data[i].sv[1].tv_sec * 1000000 \
+			+ thr_data[i].sv[1].tv_usec) * 1000 / \
+			g_times));
+	}
+	SEC_TST_PRT("Poll thread, WAIT:%0.0f ns, RECV:%0.0f ns\n",
+		(double)((async_sv[0].tv_sec * 1000000 \
+		+ async_sv[0].tv_usec) * 1000 / g_times),
+		(double)((async_sv[1].tv_sec * 1000000 \
+		+ async_sv[1].tv_usec) * 1000 / g_times));
+#endif
 	gettimeofday(&cur_tval, NULL);
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
 				cur_tval.tv_usec - start_tval.tv_usec);
