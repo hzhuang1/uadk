@@ -308,8 +308,6 @@ static int hisi_qm_setup_info(struct hisi_qp *qp, struct hisi_qm_priv *config)
 		q_info->region_size[UACCE_QFRT_DUS] - sizeof(uint32_t);
 	q_info->ds_rx_base = q_info->ds_tx_base - sizeof(uint32_t);
 
-	pthread_spin_init(&q_info->lock, PTHREAD_PROCESS_SHARED);
-
 	return 0;
 
 err_out:
@@ -392,8 +390,6 @@ int hisi_qm_send(handle_t h_qp, void *req, __u16 expect, __u16 *count)
 
 	q_info = &qp->q_info;
 
-	pthread_spin_lock(&q_info->lock);
-
 	if (wd_ioread32(q_info->ds_tx_base) == 1) {
 		WD_ERR("wd queue hw error happened before qm send!\n");
 		return -WD_HW_EACCESS;
@@ -401,7 +397,6 @@ int hisi_qm_send(handle_t h_qp, void *req, __u16 expect, __u16 *count)
 
 	free_num = hisi_qm_get_free_num(q_info);
 	if (!free_num) {
-		pthread_spin_unlock(&q_info->lock);
 		return -EBUSY;
 	}
 
@@ -414,8 +409,6 @@ int hisi_qm_send(handle_t h_qp, void *req, __u16 expect, __u16 *count)
 	q_info->sq_tail_index = tail;
 	q_info->used_num += send_num;
 	*count = send_num;
-
-	pthread_spin_unlock(&q_info->lock);
 
 	return 0;
 }
@@ -450,13 +443,10 @@ static int hisi_qm_recv_single(struct hisi_qm_queue_info *q_info, void *resp)
 
 	q_info->db(q_info, DOORBELL_CMD_CQ, i, 0);
 
-	/* only support one thread poll one queue, so no need protect */
 	q_info->cq_head_index = i;
 	q_info->sq_head_index = i;
 
-	pthread_spin_lock(&q_info->lock);
 	q_info->used_num--;
-	pthread_spin_unlock(&q_info->lock);
 
 	return 0;
 }
