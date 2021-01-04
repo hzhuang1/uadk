@@ -355,12 +355,14 @@ int wd_do_digest_async(handle_t h_sess, struct wd_digest_req *req)
 	fill_request_msg(msg, req, dsess);
 	msg->tag = idx;
 
+	pthread_spin_lock(&ctx->lock);
 	ret = wd_digest_setting.driver->digest_send(ctx->ctx, msg);
 	if (ret < 0) {
 		WD_ERR("failed to send BD, hw is err!\n");
 		wd_put_msg_to_pool(&wd_digest_setting.pool, index, msg->tag);
 		return ret;
 	}
+	pthread_spin_unlock(&ctx->lock);
 
 	return 0;
 }
@@ -380,8 +382,10 @@ int wd_digest_poll_ctx(__u32 index, __u32 expt, __u32 *count)
 	}
 
 	do {
+		pthread_spin_lock(&ctx->lock);
 		ret = wd_digest_setting.driver->digest_recv(ctx->ctx,
 							    &recv_msg);
+		pthread_spin_unlock(&ctx->lock);
 		if (ret == -EAGAIN) {
 			break;
 		} else if (ret < 0) {
