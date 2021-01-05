@@ -12,7 +12,7 @@
 #include "wd_cipher.h"
 #include "wd_digest.h"
 #include "wd_aead.h"
-#include "sched_sample.h"
+#include "sched_greedy.h"
 
 #define SEC_TST_PRT printf
 #define HW_CTX_SIZE (24 * 1024)
@@ -331,7 +331,7 @@ static int init_ctx_config(int type, int mode)
 		g_ctx_cfg.ctxs[i].ctx_mode = (__u8)mode;
 	}
 
-	g_sched = sample_sched_alloc(SCHED_POLICY_RR, 1, MAX_NUMA_NUM, wd_cipher_poll_ctx);
+	g_sched = sched_greedy_alloc(1, MAX_NUMA_NUM, wd_cipher_poll_ctx);
 	if (!g_sched) {
 		printf("Fail to alloc sched!\n");
 		goto out;
@@ -341,26 +341,27 @@ static int init_ctx_config(int type, int mode)
 	if (list->dev->numa_id < 0)
 		list->dev->numa_id = 0;
 
-	g_sched->name = SCHED_SINGLE;
-	ret = sample_sched_fill_data(g_sched, list->dev->numa_id, mode, 0, 0, g_ctxnum - 1);
+	ret = sched_greedy_bind_ctx(g_sched, list->dev->numa_id, 0, mode,
+				    &g_ctx_cfg.ctxs[0], g_ctxnum);
 	if (ret) {
-		printf("Fail to fill sched data!\n");
-		goto out;
+		printf("Fail to bind cipher ctx into scheduler!\n");
+		goto out_bind;
 	}
 
 	/*cipher init*/
 	ret = wd_cipher_init(&g_ctx_cfg, g_sched);
 	if (ret) {
 		printf("Fail to cipher ctx!\n");
-		goto out;
+		goto out_bind;
 	}
 
 	wd_free_list_accels(list);
 
 	return 0;
+out_bind:
+	sched_greedy_free(g_sched);
 out:
 	free(g_ctx_cfg.ctxs);
-	sample_sched_release(g_sched);
 
 	return ret;
 }
@@ -373,7 +374,7 @@ static void uninit_config(void)
 	for (i = 0; i < g_ctx_cfg.ctx_num; i++)
 		wd_release_ctx(g_ctx_cfg.ctxs[i].ctx);
 	free(g_ctx_cfg.ctxs);
-	sample_sched_release(g_sched);
+	sched_greedy_free(g_sched);
 }
 
 static void digest_uninit_config(void)

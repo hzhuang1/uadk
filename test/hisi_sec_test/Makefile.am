@@ -2,7 +2,7 @@ AM_CFLAGS=-Wall -Werror -fno-strict-aliasing -I../../include -pthread
 
 bin_PROGRAMS=test_hisi_sec
 
-test_hisi_sec_SOURCES=test_hisi_sec.c ../sched_sample.c
+test_hisi_sec_SOURCES=test_hisi_sec.c ../sched_sample.c ../sched_greedy.c
 
 if WD_STATIC_DRV
 AM_CFLAGS+=-Bstatic
