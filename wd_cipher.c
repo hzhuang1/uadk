@@ -365,6 +365,8 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	} while (ret < 0);
 	pthread_spin_unlock(&ctx->lock);
 
+	wd_cipher_setting.sched.put_ctx(wd_cipher_setting.sched.h_sched_ctx, index);
+
 	return 0;
 recv_err:
 	req->state = msg.result;
