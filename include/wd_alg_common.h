@@ -61,7 +61,7 @@ struct wd_ctx {
 	handle_t ctx;
 	__u8 op_type;
 	__u8 ctx_mode;
-	pthread_spinlock_t lock;
+	pthread_mutex_t lock;
 };
 
 /**

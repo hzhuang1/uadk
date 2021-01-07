@@ -61,7 +61,7 @@ int get_pos_in_region(struct sched_ctx_region *region)
 	}
 	for (i = 0, found = 0; !found && i < region->num; i++) {
 		off = (i + 1 + region->last) % region->num;
-		ret = pthread_spin_trylock(&region->ctx_pool[off].lock);
+		ret = pthread_mutex_trylock(&region->ctx_pool[off].lock);
 		if (ret)
 			continue;
 		found = 1;
@@ -69,7 +69,7 @@ int get_pos_in_region(struct sched_ctx_region *region)
 	}
 	if (!found) {
 		off = (i + 1 + region->last) % region->num;
-		pthread_spin_lock(&region->ctx_pool[off].lock);
+		pthread_mutex_lock(&region->ctx_pool[off].lock);
 		region->last = off;
 	}
 	return region->last;
@@ -140,7 +140,7 @@ static void sched_greedy_put_ctx(handle_t h_sched, __u32 pos)
 			offs = pos - sum;
 			ctx = &info->region[i].ctx_pool[offs];
 			if (ctx)
-				pthread_spin_unlock(&ctx->lock);
+				pthread_mutex_unlock(&ctx->lock);
 		}
 	}
 }
@@ -305,7 +305,7 @@ int sched_greedy_bind_ctx(struct wd_sched *sched, __u8 numa, __u8 type,
 		return -ENOMEM;
 	memcpy(ctx_pool, ctxs, num * sizeof(struct wd_ctx));
 	for (i = 0; i < num; i++) {
-		pthread_spin_init(&ctx_pool[i].lock, PTHREAD_PROCESS_SHARED);
+		pthread_mutex_init(&ctx_pool[i].lock, NULL);
 	}
 	region = get_region(sched->h_sched_ctx, type, mode, numa);
 	if (!region) {
