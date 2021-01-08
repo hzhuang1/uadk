@@ -309,6 +309,7 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	struct wd_cipher_sess *sess = (struct wd_cipher_sess *)h_sess;
 	struct wd_ctx_internal *ctx;
 	struct wd_cipher_msg msg;
+	struct wd_sched *sched = &wd_cipher_setting.sched;
 	struct sched_key key;
 	__u64 recv_cnt = 0;
 	int index, ret;
@@ -326,7 +327,8 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	key.mode = CTX_MODE_SYNC;
 	key.type = 0;
 	key.numa_id = sess->numa;
-	index = wd_cipher_setting.sched.pick_next_ctx(wd_cipher_setting.sched.h_sched_ctx, req, &key);
+	index = wd_cipher_setting.sched.pick_next_ctx(sched->h_sched_ctx,
+						      req, &key);
 	if (unlikely(index >= config->ctx_num)) {
 		WD_ERR("fail to pick a proper ctx!\n");
 		return -EINVAL;
@@ -361,7 +363,7 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 		}
 	} while (ret < 0);
 
-	wd_cipher_setting.sched.put_ctx(wd_cipher_setting.sched.h_sched_ctx, index);
+	wd_cipher_setting.sched.put_ctx(sched->h_sched_ctx, index);
 
 	return 0;
 recv_err:
@@ -412,14 +414,12 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	fill_request_msg(msg, req, sess);
 	msg->tag = idx;
 
-	pthread_spin_lock(&ctx->lock);
 	ret = wd_cipher_setting.driver->cipher_send(ctx->ctx, msg);
 	if (ret < 0) {
 		if (ret != -EBUSY)
 			WD_ERR("wd cipher async send err!\n");
 		wd_put_msg_to_pool(&wd_cipher_setting.pool, index, msg->tag);
 	}
-	pthread_spin_unlock(&ctx->lock);
 
 	return ret;
 }
@@ -430,6 +430,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	struct wd_ctx_internal *ctx = config->ctxs + index;
 	struct wd_cipher_msg resp_msg, *msg;
 	struct wd_cipher_req *req;
+	struct wd_sched *sched = &wd_cipher_setting.sched;
 	__u64 recv_count = 0;
 	int ret;
 
@@ -441,7 +442,8 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	do {
 		memset(&resp_msg, 0, sizeof(struct wd_cipher_msg));
 		pthread_spin_lock(&ctx->lock);
-		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx, &resp_msg);
+		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx,
+							    &resp_msg);
 		pthread_spin_unlock(&ctx->lock);
 		if (ret == -EAGAIN)
 			return ret;
@@ -465,6 +467,8 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		wd_put_msg_to_pool(&wd_cipher_setting.pool, index,
 				   resp_msg.tag);
 		*count = recv_count;
+		wd_cipher_setting.sched.put_ctx(sched->h_sched_ctx,
+						index);
 	} while (expt > *count);
 
 	return ret;
