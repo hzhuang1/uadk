@@ -439,6 +439,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	}
 
 	do {
+		memset(&resp_msg, 0, sizeof(struct wd_cipher_msg));
 		pthread_spin_lock(&ctx->lock);
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx, &resp_msg);
 		pthread_spin_unlock(&ctx->lock);
