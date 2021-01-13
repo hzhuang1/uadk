@@ -9,6 +9,8 @@
 
 #include "sched_greedy.h"
 
+#define MAX_POLL_TIMES 1000
+
 enum sched_region_mode {
 	SCHED_MODE_SYNC = 0,
 	SCHED_MODE_ASYNC,
@@ -25,7 +27,7 @@ struct sched_ctx_region {
 	struct wd_ctx *ctx_pool;
 	int num;
 	int last;
-	int region_idx;
+	int rgn_idx;
 	bool valid;
 	pthread_mutex_t lock;
 };
@@ -123,7 +125,7 @@ static __u32 sched_greedy_pick_next(handle_t h_sched, const void *req,
 	if (offs < 0) {
 		return INVALID_POS;
 	}
-	return convert_unique_pos(h_sched, region->region_idx, offs);
+	return convert_unique_pos(h_sched, region->rgn_idx, offs);
 }
 
 static void sched_greedy_put_ctx(handle_t h_sched, __u32 pos)
@@ -159,8 +161,10 @@ static int sched_greedy_poll_policy(handle_t h_sched, __u32 expect,
 				    __u32 *count)
 {
 	struct sched_greedy_info *info = (struct sched_greedy_info *)h_sched;
-	int numa;
+	struct sched_ctx_region *region;
+	int loop, type, numa, offs;
 	int ret = 0;
+	__u32 pos;
 
 	if (!count) {
 		WD_ERR("ERROR: %s the para is NULL !\n", __func__);
@@ -169,15 +173,31 @@ static int sched_greedy_poll_policy(handle_t h_sched, __u32 expect,
 	if (!expect)
 		return 0;
 
-	for (numa = 0; numa < info->numa_num; numa++) {
-#if 0
-		if (info[numa_id]->valid) {
-			ret = sample_poll_policy_rr(ctx, numa_id, expect,
-						    count);
-#endif
-			if (ret)
-				return ret;
-	//	}
+	for (loop = 0; loop < MAX_POLL_TIMES; loop++) {
+		for (type = 0; type < info->type_num; type++) {
+			for (numa = 0; numa < info->numa_num; numa++) {
+				region = get_region(h_sched, type,
+						    SCHED_MODE_ASYNC,
+						    numa);
+				if (!region->num)
+					continue;
+				for (offs = 0; offs < region->num; offs++) {
+					pos = convert_unique_pos(h_sched,
+								 region->rgn_idx,
+								 offs);
+					ret = info->poll_func(pos, expect,
+							      count);
+					//WD_ERR("#%s, %d, loop:%d, type:%d, numa:%d, offs:%d, expect:%d, count:%d, ret:%d\n",
+					//	__func__, __LINE__, loop, type, numa, offs, expect, *count, ret);
+					if ((ret < 0) && (ret != -EAGAIN))
+						return ret;
+					else if (ret == -EAGAIN)
+						continue;
+					if (*count >= expect)
+						return 0;
+				}
+			}
+		}
 	}
 
 	return 0;
@@ -247,7 +267,7 @@ struct wd_sched *sched_greedy_alloc(__u8 type_num, __u8 numa_num,
 		goto out_region;
 	}
 	for (i = 0; i < region_num; i++)
-		region[i].region_idx = i;
+		region[i].rgn_idx = i;
 	info->region = region;
 	info->poll_func = func;
 	info->type_num = type_num;
