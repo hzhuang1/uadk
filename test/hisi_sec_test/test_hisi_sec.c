@@ -3161,7 +3161,9 @@ static void *sva_poll_func(void *arg)
 	__u32 count = 0;
 	int ret;
 #ifdef WD_CIPHER_PERF
-	int sc;
+	struct timeval begin, end, misc;
+	double sum, wait, rcv;
+	int sc, start = 0;
 #endif
 
 	int expt = g_times * g_thread_num;
@@ -3169,14 +3171,36 @@ static void *sva_poll_func(void *arg)
 #ifdef WD_CIPHER_PERF
 	for (sc = 0; sc < 3; sc++)
 		timerclear(&async_sv[sc]);
+	gettimeofday(&begin, NULL);
 #endif
 	do {
+#ifdef WD_CIPHER_PERF
+		if (!count && !start) {
+			gettimeofday(&misc, NULL);
+		}
+#endif
 		ret = wd_cipher_poll(expt, &count);
 		if (ret < 0 && ret != -EAGAIN) {
 			SEC_TST_PRT("poll ctx error: %d\n", ret);
 			break;
 		}
+		if (count && !start) {
+			start = 1;
+			timersub(&misc, &begin, &misc);
+		}
 	} while (expt - count);
+#ifdef WD_CIPHER_PERF
+	gettimeofday(&end, NULL);
+	timersub(&end, &begin, &end);
+	sum = end.tv_sec * 1000 * 1000 + end.tv_usec -
+		(misc.tv_sec * 1000 * 1000 + misc.tv_usec);
+	wait = async_sv[0].tv_sec * 1000 * 1000 + async_sv[0].tv_usec;
+	rcv = async_sv[1].tv_sec * 1000 * 1000 + async_sv[1].tv_usec;
+	SEC_TST_PRT("Poll before %0.0f us, wait %0.0f%%, receive %0.0f%%, other %0.0f%%\n",
+		(double)(misc.tv_sec * 1000 * 1000 + misc.tv_usec),
+		wait * 100 / sum, rcv * 100 / sum,
+		(sum - wait - rcv) * 100 / sum);
+#endif
 
 	pthread_exit(NULL);
 

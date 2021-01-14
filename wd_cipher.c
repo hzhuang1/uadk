@@ -492,7 +492,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	__u64 recv_count = 0;
 	int ret;
 #ifdef WD_CIPHER_PERF
-	struct timeval old, new, wait, rcv;
+	struct timeval old, new, wait, rcv, put;
 #endif
 
 	if (unlikely(index >= config->ctx_num || !count)) {
@@ -505,6 +505,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	timerclear(&new);
 	timerclear(&wait);
 	timerclear(&rcv);
+	timerclear(&put);
 	gettimeofday(&old, NULL);
 #endif
 	do {
@@ -531,6 +532,13 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 			WD_ERR("wd cipher recv hw err!\n");
 			return ret;
 		}
+		wd_cipher_setting.sched.put_ctx(h_ctx, index);
+#ifdef WD_CIPHER_PERF
+		gettimeofday(&new, NULL);
+		timersub(&new, &old, &old);
+		timeradd(&put, &old, &put);
+		memcpy(&old, &new, sizeof(struct timeval));
+#endif
 		recv_count++;
 		msg = wd_find_msg_in_pool(&wd_cipher_setting.pool, index,
 					  resp_msg.tag);
@@ -542,28 +550,21 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		msg->tag = resp_msg.tag;
 		req = &msg->req;
 
+#ifdef WD_CIPHER_PERF
+		memcpy(&req->cv[2], &wait, sizeof(struct timeval));
+		memcpy(&req->cv[3], &rcv, sizeof(struct timeval));
+		memcpy(&req->cv[4], &put, sizeof(struct timeval));
+		timerclear(&wait);
+		timerclear(&rcv);
+		timerclear(&put);
+#endif
 		req->cb(req, req->cb_param);
 		/* free msg cache to msg_pool */
 		wd_put_msg_to_pool(&wd_cipher_setting.pool, index,
 				   resp_msg.tag);
 		*count += recv_count;
-		wd_cipher_setting.sched.put_ctx(h_ctx, index);
-#ifdef WD_CIPHER_PERF
-		req->cv[2].tv_sec = wait.tv_sec;
-		req->cv[2].tv_usec = wait.tv_usec;
-		req->cv[3].tv_sec = rcv.tv_sec;
-		req->cv[3].tv_usec = rcv.tv_usec;
 
-		//gettimeofday(&new, NULL);
-		//timersub(&new, &old, &req->cv[4]);
-		//memcpy(&old, &new, sizeof(struct timeval));
-#endif
 	} while (expt > *count);
-#ifdef WD_CIPHER_PERF
-	gettimeofday(&new, NULL);
-	timersub(&new, &old, &req->cv[4]);
-	memcpy(&old, &new, sizeof(struct timeval));
-#endif
 
 	return ret;
 }
