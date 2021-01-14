@@ -309,7 +309,7 @@ void sched_greedy_free(struct wd_sched *sched)
 }
 
 int sched_greedy_bind_ctx(struct wd_sched *sched, __u8 numa, __u8 type,
-			  __u8 mode, struct wd_ctx *ctxs, __u8 num)
+			  __u8 mode, struct wd_ctx *ctxs, int num)
 {
 	struct sched_greedy_info *info;
 	struct sched_ctx_region *region;

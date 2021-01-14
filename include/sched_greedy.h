@@ -31,7 +31,7 @@ typedef int (*user_poll_func)(__u32 pos, __u32 expect, __u32 *count);
  * then select one index from begin to end.
  */
 int sched_greedy_bind_ctx(struct wd_sched *sched, __u8 numa, __u8 type,
-			  __u8 mode, struct wd_ctx *ctxs, __u8 num);
+			  __u8 mode, struct wd_ctx *ctxs, int num);
 
 /**
  * sched_greedy_alloc - Allocate a schedule instance.
