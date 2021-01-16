@@ -3188,7 +3188,7 @@ static void *sva_poll_func(void *arg)
 			start = 1;
 			timersub(&misc, &begin, &misc);
 		}
-	} while (expt - count);
+	} while (expt > count);
 #ifdef WD_CIPHER_PERF
 	gettimeofday(&end, NULL);
 	timersub(&end, &begin, &end);

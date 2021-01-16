@@ -63,6 +63,7 @@ int wd_init_sched(struct wd_sched *in, struct wd_sched *from)
 	in->h_sched_ctx = from->h_sched_ctx;
 	in->name = strdup(from->name);
 	in->pick_next_ctx = from->pick_next_ctx;
+	in->try_get_ctx = from->try_get_ctx;
 	in->put_ctx = from->put_ctx;
 	in->poll_policy = from->poll_policy;
 

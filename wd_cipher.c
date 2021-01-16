@@ -468,6 +468,7 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 #endif
 
 	ret = wd_cipher_setting.driver->cipher_send(ctx->ctx, msg);
+	wd_cipher_setting.sched.put_ctx(h_ctx, index);
 	if (ret < 0) {
 		if (ret != -EBUSY)
 			WD_ERR("wd cipher async send err!\n");
@@ -489,8 +490,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	struct wd_cipher_msg resp_msg, *msg;
 	struct wd_cipher_req *req;
 	handle_t h_ctx = wd_cipher_setting.sched.h_sched_ctx;
-	__u64 recv_count = 0;
-	int ret;
+	int ret = 0;
 #ifdef WD_CIPHER_PERF
 	struct timeval old, new, wait, rcv, put;
 #endif
@@ -510,8 +510,12 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 #endif
 	do {
 		memset(&resp_msg, 0, sizeof(struct wd_cipher_msg));
+		ret = wd_cipher_setting.sched.try_get_ctx(h_ctx, index);
+		if (ret)
+			return ret;
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx,
 							    &resp_msg);
+		wd_cipher_setting.sched.put_ctx(h_ctx, index);
 #ifdef WD_CIPHER_PERF
 		gettimeofday(&new, NULL);
 		if (ret) {
@@ -525,21 +529,17 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		}
 		memcpy(&old, &new, sizeof(struct timeval));
 #endif
-
-		if (ret == -EAGAIN)
-			return ret;
-		else if (ret < 0) {
-			WD_ERR("wd cipher recv hw err!\n");
+		if (ret < 0) {
+			if (ret != -EAGAIN)
+				WD_ERR("wd cipher recv hw err!\n");
 			return ret;
 		}
-		wd_cipher_setting.sched.put_ctx(h_ctx, index);
 #ifdef WD_CIPHER_PERF
 		gettimeofday(&new, NULL);
 		timersub(&new, &old, &old);
 		timeradd(&put, &old, &put);
 		memcpy(&old, &new, sizeof(struct timeval));
 #endif
-		recv_count++;
 		msg = wd_find_msg_in_pool(&wd_cipher_setting.pool, index,
 					  resp_msg.tag);
 		if (!msg) {
@@ -562,7 +562,8 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		/* free msg cache to msg_pool */
 		wd_put_msg_to_pool(&wd_cipher_setting.pool, index,
 				   resp_msg.tag);
-		*count += recv_count;
+		/* Receive one message each time. */
+		(*count)++;
 
 	} while (expt > *count);
 

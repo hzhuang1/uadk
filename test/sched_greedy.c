@@ -28,6 +28,7 @@ struct sched_ctx_region {
 	int num;
 	int last;
 	int rgn_idx;
+	int mode;
 	bool valid;
 	pthread_mutex_t lock;
 };
@@ -37,6 +38,7 @@ struct sched_greedy_info {
 	__u8  numa_num;
 	user_poll_func poll_func;
 	struct sched_ctx_region *region;
+	int rgn_num;
 };
 
 static inline struct sched_ctx_region *get_region(handle_t h_sched, __u8 type,
@@ -146,6 +148,36 @@ static __u32 sched_greedy_pick_next(handle_t h_sched, const void *req,
 	return convert_unique_pos(h_sched, region->rgn_idx, offs);
 }
 
+static int sched_greedy_try_get_ctx(handle_t h_sched, __u32 pos)
+{
+	struct sched_greedy_info *info = (struct sched_greedy_info *)h_sched;
+	struct wd_ctx *ctx;
+	int i = 0, sum = 0, found = 0, ret;
+
+	do {
+		if (unlikely(i >= info->rgn_num))
+			break;
+		if (!info->region[i].valid) {
+			i++;
+			continue;
+		}
+		if (sum + info->region[i].num < pos) {
+			sum += info->region[i].num;
+			i++;
+		} else {
+			found = 1;
+			ctx = &info->region[i].ctx_pool[pos - sum];
+			if (ctx) {
+				ret = pthread_mutex_trylock(&ctx->lock);
+				if (ret)
+					return -EAGAIN;
+				return 0;
+			}
+		}
+	} while (!found);
+	return -EAGAIN;
+}
+
 static void sched_greedy_put_ctx(handle_t h_sched, __u32 pos)
 {
 	struct sched_greedy_info *info = (struct sched_greedy_info *)h_sched;
@@ -154,14 +186,15 @@ static void sched_greedy_put_ctx(handle_t h_sched, __u32 pos)
 
 	max = info->numa_num * info->type_num * SCHED_MODE_MAX;
 	for (i = 0, sum = 0; i < max; i++) {
-		sum += info->region[i].num;
-		if (sum >= pos) {
-			sum = sum - info->region[i].num;
+		if ((pos >= sum) && (pos < sum + info->region[i].num)) {
 			offs = pos - sum;
 			ctx = &info->region[i].ctx_pool[offs];
-			if (ctx)
+			if (ctx) {
 				pthread_mutex_unlock(&ctx->lock);
+				return;
+			}
 		}
+		sum += info->region[i].num;
 	}
 }
 
@@ -180,8 +213,8 @@ static int sched_greedy_poll_policy(handle_t h_sched, __u32 expect,
 {
 	struct sched_greedy_info *info = (struct sched_greedy_info *)h_sched;
 	struct sched_ctx_region *region;
-	int loop, type, numa, offs;
-	int ret = 0;
+	int loop, offs;
+	int i, ret = 0;
 	__u32 pos;
 
 	if (!count) {
@@ -192,28 +225,25 @@ static int sched_greedy_poll_policy(handle_t h_sched, __u32 expect,
 		return 0;
 
 	for (loop = 0; loop < MAX_POLL_TIMES; loop++) {
-		for (type = 0; type < info->type_num; type++) {
-			for (numa = 0; numa < info->numa_num; numa++) {
-				region = get_region(h_sched, type,
-						    SCHED_MODE_ASYNC,
-						    numa);
-				if (!region->num)
+		for (i = 0; i < info->rgn_num; i++) {
+			region = &info->region[i];
+			if (!region->valid || !region->num ||
+			    region->mode == SCHED_MODE_SYNC)
+				continue;
+			for (offs = 0; offs < region->num; offs++) {
+				if (unlikely(*count >= expect))
+					return 0;
+				pos = convert_unique_pos(h_sched,
+							 region->rgn_idx,
+							 offs);
+				ret = info->poll_func(pos, expect,
+						      count);
+				//WD_ERR("#%s, %d, loop:%d, offs:%d, expect:%d, count:%d, ret:%d\n",
+				//		__func__, __LINE__, loop, offs, expect, *count, ret);
+				if ((ret < 0) && (ret != -EAGAIN))
+					return ret;
+				else if (ret == -EAGAIN)
 					continue;
-				for (offs = 0; offs < region->num; offs++) {
-					pos = convert_unique_pos(h_sched,
-								 region->rgn_idx,
-								 offs);
-					ret = info->poll_func(pos, expect,
-							      count);
-					//WD_ERR("#%s, %d, loop:%d, type:%d, numa:%d, offs:%d, expect:%d, count:%d, ret:%d\n",
-					//	__func__, __LINE__, loop, type, numa, offs, expect, *count, ret);
-					if ((ret < 0) && (ret != -EAGAIN))
-						return ret;
-					else if (ret == -EAGAIN)
-						continue;
-					if (*count >= expect)
-						return 0;
-				}
 			}
 		}
 	}
@@ -226,6 +256,7 @@ struct sched_greedy_table {
 	enum sched_policy_type type;
 	__u32 (*pick_next_ctx)(handle_t h_sched_ctx, const void *req,
 			       const struct sched_key *key);
+	int (*try_get_ctx)(handle_t h_sched_ctx, __u32 pos);
 	void (*put_ctx)(handle_t h_sched_ctx, __u32 pos);
 	int (*poll_policy)(handle_t h_sched_ctx,
 			   __u32 expect,
@@ -235,6 +266,7 @@ struct sched_greedy_table {
 		.name = "Greedy scheduler",
 		.type = SCHED_POLICY_GREEDY,
 		.pick_next_ctx = sched_greedy_pick_next,
+		.try_get_ctx = sched_greedy_try_get_ctx,
 		.put_ctx = sched_greedy_put_ctx,
 		.poll_policy = sched_greedy_poll_policy,
 	},
@@ -290,9 +322,11 @@ struct wd_sched *sched_greedy_alloc(__u8 type_num, __u8 numa_num,
 	info->poll_func = func;
 	info->type_num = type_num;
 	info->numa_num = numa_num;
+	info->rgn_num = region_num;
 
 	sched->name = strdup(sched_greedy_table[0].name);
 	sched->pick_next_ctx = sched_greedy_table[0].pick_next_ctx;
+	sched->try_get_ctx = sched_greedy_table[0].try_get_ctx;
 	sched->put_ctx = sched_greedy_table[0].put_ctx;
 	sched->poll_policy = sched_greedy_table[0].poll_policy;
 	sched->h_sched_ctx = (handle_t)info;
@@ -309,13 +343,12 @@ out:
 void sched_greedy_free(struct wd_sched *sched)
 {
 	struct sched_greedy_info *info;
-	int i, max;
+	int i;
 
 	if (unlikely(!sched))
 		return;
 	info = (struct sched_greedy_info *)sched->h_sched_ctx;
-	max = info->numa_num * info->type_num * SCHED_MODE_MAX;
-	for (i = 0; i < max; i++) {
+	for (i = 0; i < info->rgn_num; i++) {
 		if (info->region[i].ctx_pool) {
 			free(info->region[i].ctx_pool);
 		}
@@ -352,6 +385,7 @@ int sched_greedy_bind_ctx(struct wd_sched *sched, __u8 numa, __u8 type,
 	}
 	region->ctx_pool = ctx_pool;
 	region->num = num;
+	region->mode = mode;
 	region->valid = true;
 	pthread_mutex_init(&region->lock, NULL);
 	return 0;

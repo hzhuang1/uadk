@@ -120,6 +120,7 @@ struct wd_sched {
 	__u32 (*pick_next_ctx)(handle_t h_sched_ctx,
 				  const void *req,
 				  const struct sched_key *key);
+	int (*try_get_ctx)(handle_t h_sched_ctx, __u32 pos);
 	void (*put_ctx)(handle_t h_sched_ctx, __u32 pos);
 	int (*poll_policy)(handle_t h_sched_ctx, __u32 expect, __u32 *count);
 	handle_t h_sched_ctx;
