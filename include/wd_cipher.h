@@ -100,9 +100,36 @@ struct wd_cipher_req {
 	wd_alg_cipher_cb_t	*cb;
 	void			*cb_param;
 #ifdef WD_CIPHER_PERF
-	struct timeval		cv[6];
+	struct timespec		cv[6];
 #endif
 };
+
+#ifdef WD_CIPHER_PERF
+#define timespec_clear(a)					\
+	do {							\
+		memset(a, 0, sizeof(struct timespec));		\
+	} while (0)
+
+#define timespec_add(a, b, res)					\
+	do {							\
+		(res)->tv_sec = (a)->tv_sec + (b)->tv_sec;	\
+		(res)->tv_nsec = (a)->tv_nsec + (b)->tv_nsec;	\
+		if ((res)->tv_nsec >= 1000000000) {		\
+			(res)->tv_sec++;			\
+			(res)->tv_nsec -= 1000000000;		\
+		}						\
+	} while (0)
+
+#define timespec_sub(a, b, res)					\
+	do {							\
+		(res)->tv_sec = (a)->tv_sec - (b)->tv_sec;	\
+		(res)->tv_nsec = (a)->tv_nsec - (b)->tv_nsec;	\
+		if ((res)->tv_nsec < 0) {			\
+			(res)->tv_sec--;			\
+			(res)->tv_nsec += 1000000000;		\
+		}						\
+	} while (0)
+#endif
 
 /**
  * wd_cipher_init() Initialise ctx configuration and schedule.

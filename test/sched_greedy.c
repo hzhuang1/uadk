@@ -175,7 +175,7 @@ static int sched_greedy_try_get_ctx(handle_t h_sched, __u32 pos)
 			}
 		}
 	} while (!found);
-	return -EAGAIN;
+	return -EBUSY;
 }
 
 static void sched_greedy_put_ctx(handle_t h_sched, __u32 pos)

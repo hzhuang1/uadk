@@ -72,7 +72,7 @@ typedef struct _thread_data_t {
 	unsigned long long send_task_num;
 	unsigned long long recv_task_num;
 #ifdef WD_CIPHER_PERF
-	struct timeval sv[5];
+	struct timespec sv[5];
 #endif
 } thread_data_t;
 
@@ -113,7 +113,7 @@ static pthread_t system_test_thrds[THREADS_NUM];
 static thread_data_t thr_data[THREADS_NUM];
 
 #ifdef WD_CIPHER_PERF
-static struct timeval async_sv[4];
+static struct timespec async_sv[4];
 #endif
 
 static void hexdump(char *buff, unsigned int len)
@@ -601,8 +601,8 @@ static void *async_cb(struct wd_cipher_req *req, void *data)
 #ifdef WD_CIPHER_PERF
 	int i;
 
-	for (i = 0; i < 3; i++)
-		timeradd(&async_sv[i], &req->cv[i + 2], &async_sv[i]);
+	for (i = 0; i < 4; i++)
+		timespec_add(&async_sv[i], &req->cv[i + 2], &async_sv[i]);
 #endif
 
 	return NULL;
@@ -3102,13 +3102,13 @@ static void *sva_sec_cipher_async(void *arg)
 	int ret;
 	int j;
 #ifdef WD_CIPHER_PERF
-	struct timeval sv[2];
+	struct timespec sv[2];
 	int sc;
 #endif
 
 #ifdef WD_CIPHER_PERF
 	for (sc = 0; sc < 2; sc++)
-		timerclear(&sv[sc]);
+		timespec_clear(&sv[sc]);
 #endif
 	/* get resource */
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
@@ -3141,12 +3141,12 @@ try_do_again:
 		count++; // count means data block numbers
 #ifdef WD_CIPHER_PERF
 		for (sc = 0; sc < 2; sc++)
-			timeradd(&sv[sc], &req->cv[sc], &sv[sc]);
+			timespec_add(&sv[sc], &req->cv[sc], &sv[sc]);
 #endif
 	} while (cnt);
 #ifdef WD_CIPHER_PERF
 	for (sc = 0; sc < 2; sc++)
-		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timeval));
+		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timespec));
 #endif
 
 	ret = 0;
@@ -3161,7 +3161,7 @@ static void *sva_poll_func(void *arg)
 	__u32 count = 0;
 	int ret;
 #ifdef WD_CIPHER_PERF
-	struct timeval begin, end, misc;
+	struct timespec begin, end, misc;
 	double sum, wait, rcv, get;
 	int sc, start = 0;
 #endif
@@ -3170,37 +3170,37 @@ static void *sva_poll_func(void *arg)
 
 #ifdef WD_CIPHER_PERF
 	for (sc = 0; sc < 4; sc++)
-		timerclear(&async_sv[sc]);
-	gettimeofday(&begin, NULL);
+		timespec_clear(&async_sv[sc]);
+	clock_gettime(CLOCK_REALTIME, &begin);
 #endif
 	do {
 #ifdef WD_CIPHER_PERF
 		if (!count && !start) {
-			gettimeofday(&misc, NULL);
+			clock_gettime(CLOCK_REALTIME, &misc);
 		}
 #endif
 		ret = wd_cipher_poll(expt, &count);
+#ifdef WD_CIPHER_PERF
+		if (!ret || ret == -EAGAIN) {
+			if (count && !start) {
+				start = 1;
+				memcpy(&begin, &misc, sizeof(struct timespec));
+			}
+		}
+#endif
 		if (ret < 0 && ret != -EAGAIN) {
 			SEC_TST_PRT("poll ctx error: %d\n", ret);
 			break;
 		}
-#ifdef WD_CIPHER_PERF
-		if (count && !start) {
-			start = 1;
-			timersub(&misc, &begin, &misc);
-		}
-#endif
 	} while (expt > count);
 #ifdef WD_CIPHER_PERF
-	gettimeofday(&end, NULL);
-	timersub(&end, &begin, &end);
-	sum = end.tv_sec * 1000 * 1000 + end.tv_usec -
-		(misc.tv_sec * 1000 * 1000 + misc.tv_usec);
-	get = async_sv[0].tv_sec * 1000 * 1000 + async_sv[0].tv_usec;
-	wait = async_sv[1].tv_sec * 1000 * 1000 + async_sv[1].tv_usec;
-	rcv = async_sv[2].tv_sec * 1000 * 1000 + async_sv[2].tv_usec;
-	SEC_TST_PRT("Poll before %0.0f us, get %0.0f%%, wait %0.0f%%, receive %0.0f%%, other %0.0f%%\n",
-		(double)(misc.tv_sec * 1000 * 1000 + misc.tv_usec),
+	clock_gettime(CLOCK_REALTIME, &end);
+	timespec_sub(&end, &begin, &end);
+	sum = end.tv_sec * 1000000000 + end.tv_nsec;
+	get = async_sv[0].tv_sec * 1000000000 + async_sv[0].tv_nsec;
+	wait = async_sv[1].tv_sec * 1000000000 + async_sv[1].tv_nsec;
+	rcv = async_sv[2].tv_sec * 1000000000 + async_sv[2].tv_nsec;
+	SEC_TST_PRT("Poll get %0.0f%%, wait %0.0f%%, receive %0.0f%%, other %0.0f%%\n",
 		get * 100 / sum,
 		wait * 100 / sum, rcv * 100 / sum,
 		(sum - get - wait - rcv) * 100 / sum);
@@ -3266,22 +3266,20 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 		SEC_TST_PRT("Average data of thread %d, P CTX:%0.0f ns, "
 			"SEND:%0.0f ns\n",
 			i,
-			(double)((thr_data[i].sv[0].tv_sec * 1000000 \
-			+ thr_data[i].sv[0].tv_usec) * 1000 / \
-			g_times),
-			(double)((thr_data[i].sv[1].tv_sec * 1000000 \
-			+ thr_data[i].sv[1].tv_usec) * 1000 / \
-			g_times));
+			(double)((thr_data[i].sv[0].tv_sec * 1000000000 \
+			+ thr_data[i].sv[0].tv_nsec) / g_times),
+			(double)((thr_data[i].sv[1].tv_sec * 1000000000 \
+			+ thr_data[i].sv[1].tv_nsec) / g_times));
 	}
 	SEC_TST_PRT("Poll thread, GET:%0.0f ns, WAIT:%0.0f ns, RECV:%0.0f ns, PUT:%0.0f ns\n",
-		(double)((async_sv[0].tv_sec * 1000000 \
-		+ async_sv[0].tv_usec) * 1000 / g_times),
-		(double)((async_sv[1].tv_sec * 1000000 \
-		+ async_sv[1].tv_usec) * 1000 / g_times),
-		(double)((async_sv[2].tv_sec * 1000000 \
-		+ async_sv[2].tv_usec) * 1000 / g_times),
-		(double)((async_sv[3].tv_sec * 1000000 \
-		+ async_sv[3].tv_usec) * 1000 / g_times));
+		((double)async_sv[0].tv_sec * 1000000000 \
+		+ async_sv[0].tv_nsec) / g_times,
+		((double)async_sv[1].tv_sec * 1000000000 \
+		+ async_sv[1].tv_nsec) / g_times,
+		((double)async_sv[2].tv_sec * 1000000000 \
+		+ async_sv[2].tv_nsec) / g_times,
+		((double)async_sv[3].tv_sec * 1000000000 \
+		+ async_sv[3].tv_nsec) / g_times);
 #endif
 	gettimeofday(&cur_tval, NULL);
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
@@ -3307,13 +3305,13 @@ static void *sva_sec_cipher_sync(void *arg)
 	int ret;
 	int j;
 #ifdef WD_CIPHER_PERF
-	struct timeval sv[5];
+	struct timespec sv[5];
 	int sc;
 #endif
 
 #ifdef WD_CIPHER_PERF
 	for (sc = 0; sc < 5; sc++)
-		timerclear(&sv[sc]);
+		timespec_clear(&sv[sc]);
 #endif
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
@@ -3338,12 +3336,12 @@ static void *sva_sec_cipher_sync(void *arg)
 		count++;
 #ifdef WD_CIPHER_PERF
 		for (sc = 0; sc < 5; sc++)
-			timeradd(&sv[sc], &req->cv[sc], &sv[sc]);
+			timespec_add(&sv[sc], &req->cv[sc], &sv[sc]);
 #endif
 	}
 #ifdef WD_CIPHER_PERF
 	for (sc = 0; sc < 5; sc++)
-		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timeval));
+		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timespec));
 #endif
 
 out:
@@ -3395,20 +3393,20 @@ static int sva_sync_create_threads(int thread_num, struct wd_cipher_req *reqs,
 			"SEND:%0.0f ns, WAIT:%0.0f ns, "
 			"RECV:%0.0f ns, PUT:%0.0f ns\n",
 			i,
-			(double)((thr_data[i].sv[0].tv_sec * 1000000 \
-			+ thr_data[i].sv[0].tv_usec) * 1000 / \
+			(double)((thr_data[i].sv[0].tv_sec * 1000000000 \
+			+ thr_data[i].sv[0].tv_nsec) / \
 			g_times),
-			(double)((thr_data[i].sv[1].tv_sec * 1000000 \
-			+ thr_data[i].sv[1].tv_usec) * 1000 / \
+			(double)((thr_data[i].sv[1].tv_sec * 1000000000 \
+			+ thr_data[i].sv[1].tv_nsec) / \
 			g_times),
-			(double)((thr_data[i].sv[2].tv_sec * 1000000 \
-			+ thr_data[i].sv[2].tv_usec) * 1000 / \
+			(double)((thr_data[i].sv[2].tv_sec * 1000000000 \
+			+ thr_data[i].sv[2].tv_nsec) / \
 			g_times),
-			(double)((thr_data[i].sv[3].tv_sec * 1000000 \
-			+ thr_data[i].sv[3].tv_usec) * 1000 / \
+			(double)((thr_data[i].sv[3].tv_sec * 1000000000 \
+			+ thr_data[i].sv[3].tv_nsec) / \
 			g_times),
-			(double)((thr_data[i].sv[4].tv_sec * 1000000 \
-			+ thr_data[i].sv[4].tv_usec) * 1000 / \
+			(double)((thr_data[i].sv[4].tv_sec * 1000000000 \
+			+ thr_data[i].sv[4].tv_nsec) / \
 			g_times));
 	}
 #endif
