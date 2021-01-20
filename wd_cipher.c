@@ -515,7 +515,6 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 			return ret;
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx,
 							    &resp_msg);
-		wd_cipher_setting.sched.put_ctx(h_ctx, index);
 #ifdef WD_CIPHER_PERF
 		gettimeofday(&new, NULL);
 		if (ret) {
@@ -529,6 +528,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		}
 		memcpy(&old, &new, sizeof(struct timeval));
 #endif
+		wd_cipher_setting.sched.put_ctx(h_ctx, index);
 		if (ret < 0) {
 			if (ret != -EAGAIN)
 				WD_ERR("wd cipher recv hw err!\n");
