@@ -113,7 +113,7 @@ static pthread_t system_test_thrds[THREADS_NUM];
 static thread_data_t thr_data[THREADS_NUM];
 
 #ifdef WD_CIPHER_PERF
-static struct timeval async_sv[3];
+static struct timeval async_sv[4];
 #endif
 
 static void hexdump(char *buff, unsigned int len)
@@ -3162,14 +3162,14 @@ static void *sva_poll_func(void *arg)
 	int ret;
 #ifdef WD_CIPHER_PERF
 	struct timeval begin, end, misc;
-	double sum, wait, rcv;
+	double sum, wait, rcv, get;
 	int sc, start = 0;
 #endif
 
 	int expt = g_times * g_thread_num;
 
 #ifdef WD_CIPHER_PERF
-	for (sc = 0; sc < 3; sc++)
+	for (sc = 0; sc < 4; sc++)
 		timerclear(&async_sv[sc]);
 	gettimeofday(&begin, NULL);
 #endif
@@ -3196,12 +3196,14 @@ static void *sva_poll_func(void *arg)
 	timersub(&end, &begin, &end);
 	sum = end.tv_sec * 1000 * 1000 + end.tv_usec -
 		(misc.tv_sec * 1000 * 1000 + misc.tv_usec);
-	wait = async_sv[0].tv_sec * 1000 * 1000 + async_sv[0].tv_usec;
-	rcv = async_sv[1].tv_sec * 1000 * 1000 + async_sv[1].tv_usec;
-	SEC_TST_PRT("Poll before %0.0f us, wait %0.0f%%, receive %0.0f%%, other %0.0f%%\n",
+	get = async_sv[0].tv_sec * 1000 * 1000 + async_sv[0].tv_usec;
+	wait = async_sv[1].tv_sec * 1000 * 1000 + async_sv[1].tv_usec;
+	rcv = async_sv[2].tv_sec * 1000 * 1000 + async_sv[2].tv_usec;
+	SEC_TST_PRT("Poll before %0.0f us, get %0.0f%%, wait %0.0f%%, receive %0.0f%%, other %0.0f%%\n",
 		(double)(misc.tv_sec * 1000 * 1000 + misc.tv_usec),
+		get * 100 / sum,
 		wait * 100 / sum, rcv * 100 / sum,
-		(sum - wait - rcv) * 100 / sum);
+		(sum - get - wait - rcv) * 100 / sum);
 #endif
 
 	pthread_exit(NULL);
@@ -3271,13 +3273,15 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 			+ thr_data[i].sv[1].tv_usec) * 1000 / \
 			g_times));
 	}
-	SEC_TST_PRT("Poll thread, WAIT:%0.0f ns, RECV:%0.0f ns, PUT:%0.0f ns\n",
+	SEC_TST_PRT("Poll thread, GET:%0.0f ns, WAIT:%0.0f ns, RECV:%0.0f ns, PUT:%0.0f ns\n",
 		(double)((async_sv[0].tv_sec * 1000000 \
 		+ async_sv[0].tv_usec) * 1000 / g_times),
 		(double)((async_sv[1].tv_sec * 1000000 \
 		+ async_sv[1].tv_usec) * 1000 / g_times),
 		(double)((async_sv[2].tv_sec * 1000000 \
-		+ async_sv[2].tv_usec) * 1000 / g_times));
+		+ async_sv[2].tv_usec) * 1000 / g_times),
+		(double)((async_sv[3].tv_sec * 1000000 \
+		+ async_sv[3].tv_usec) * 1000 / g_times));
 #endif
 	gettimeofday(&cur_tval, NULL);
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +

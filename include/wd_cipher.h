@@ -100,7 +100,7 @@ struct wd_cipher_req {
 	wd_alg_cipher_cb_t	*cb;
 	void			*cb_param;
 #ifdef WD_CIPHER_PERF
-	struct timeval		cv[5];
+	struct timeval		cv[6];
 #endif
 };
 

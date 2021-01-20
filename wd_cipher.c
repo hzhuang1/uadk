@@ -492,7 +492,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	handle_t h_ctx = wd_cipher_setting.sched.h_sched_ctx;
 	int ret = 0;
 #ifdef WD_CIPHER_PERF
-	struct timeval old, new, wait, rcv, put;
+	struct timeval old, new, wait, rcv, put, get;
 #endif
 
 	if (unlikely(index >= config->ctx_num || !count)) {
@@ -506,6 +506,7 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	timerclear(&wait);
 	timerclear(&rcv);
 	timerclear(&put);
+	timerclear(&get);
 	gettimeofday(&old, NULL);
 #endif
 	do {
@@ -513,6 +514,12 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		ret = wd_cipher_setting.sched.try_get_ctx(h_ctx, index);
 		if (ret)
 			return ret;
+#ifdef WD_CIPHER_PERF
+		gettimeofday(&new, NULL);
+		timersub(&new, &old, &old);
+		timeradd(&get, &old, &get);
+		memcpy(&old, &new, sizeof(struct timeval));
+#endif
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx,
 							    &resp_msg);
 #ifdef WD_CIPHER_PERF
@@ -551,9 +558,11 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		req = &msg->req;
 
 #ifdef WD_CIPHER_PERF
-		memcpy(&req->cv[2], &wait, sizeof(struct timeval));
-		memcpy(&req->cv[3], &rcv, sizeof(struct timeval));
-		memcpy(&req->cv[4], &put, sizeof(struct timeval));
+		memcpy(&req->cv[2], &get, sizeof(struct timeval));
+		memcpy(&req->cv[3], &wait, sizeof(struct timeval));
+		memcpy(&req->cv[4], &rcv, sizeof(struct timeval));
+		memcpy(&req->cv[5], &put, sizeof(struct timeval));
+		timerclear(&get);
 		timerclear(&wait);
 		timerclear(&rcv);
 		timerclear(&put);
