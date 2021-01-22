@@ -1,12 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+#include <getopt.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 #include <sys/syscall.h>
 #include <sys/mman.h>
 #include <sys/time.h>
-#include <getopt.h>
+#include <sys/types.h>
 
 #include "test_hisi_sec.h"
 #include "wd_cipher.h"
@@ -72,7 +73,8 @@ typedef struct _thread_data_t {
 	unsigned long long send_task_num;
 	unsigned long long recv_task_num;
 #ifdef WD_CIPHER_PERF
-	struct timespec sv[5];
+	int	pf_fd;
+	pid_t	pf_tid;
 #endif
 } thread_data_t;
 
@@ -111,9 +113,67 @@ struct test_sec_option {
 static pthread_mutex_t test_sec_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t system_test_thrds[THREADS_NUM];
 static thread_data_t thr_data[THREADS_NUM];
+static thread_data_t poll_thr_data;
 
 #ifdef WD_CIPHER_PERF
-static struct timespec async_sv[4];
+/*
+ * Filename is composed by four fields. They are "mode", "operation type",
+ * "user specifed", "day" and "time". All these fields are connected by "_".
+ * "mode" is sync or async.
+ * "operation type" is cipher or something else.
+ * "user specified" is provided by user.
+ * "day" contains month and day.
+ * "time" contains hour and minute.
+ * The suffix of the file is ".csv".
+ * For example, async_cipher_jan21_1954.csv
+ */
+char *gen_filename(char *mode, char *type, char *usr)
+{
+	struct timeval tv;
+	char *name, *ctm, *tmp;
+	int n = 0;
+
+	if (!mode || (strcmp(mode, "sync") && strcmp(mode, "async")))
+		return NULL;
+	if (!type || strcmp(type, "cipher"))
+		return NULL;
+	name = calloc(1, 32);
+	if (!name)
+		return NULL;
+	gettimeofday(&tv, NULL);
+	ctm = ctime(&tv.tv_sec);
+	if (!ctm)
+		return NULL;
+	/* skip workday */
+	tmp = strtok(ctm, " ");
+	/* fetch month and day */
+	n = sprintf(name, "%s_%s_%s%s", mode, type,
+		    strtok(NULL, " "), strtok(NULL, " "));
+	/* fetch time */
+	tmp = strtok(NULL, " ");
+	n += sprintf(name + n, "_%s%s", strtok(tmp, ":"), strtok(NULL, ":"));
+	if (usr)
+		n += sprintf(name + n, "_%s", usr);
+	n += sprintf(name + n, ".csv");
+	return name;
+}
+
+static int write_csv_file(int fd, void *src, size_t len, int newline)
+{
+	int ret;
+
+	ret = write(fd, src, len);
+	if (ret < 0)
+		goto out;
+	if (newline)
+		ret = write(fd, "\n", 1);
+	else
+		ret = write(fd, ",", 1);
+out:
+	if (ret)
+		WD_ERR("Fail to write to CSV file! (%d)\n", ret);
+	return ret;
+}
 #endif
 
 static void hexdump(char *buff, unsigned int len)
@@ -596,13 +656,32 @@ out:
 
 static void *async_cb(struct wd_cipher_req *req, void *data)
 {
-	// struct wd_cipher_req *req = (struct wd_cipher_req *)data;
-	// memcpy(&g_async_req, req, sizeof(struct wd_cipher_req));
 #ifdef WD_CIPHER_PERF
-	int i;
+	/* Dump performance data into CSV file. */
+	thread_data_t *pdata = (thread_data_t *)data;
+	struct wd_perf *pf = &req->pf;
+	int fd = pdata->pf_fd;
 
-	for (i = 0; i < 4; i++)
-		timespec_add(&async_sv[i], &req->cv[i + 2], &async_sv[i]);
+	write_csv_file(fd, &pf->name, 4, 0);
+	write_csv_file(fd, &pf->tid, sizeof(pid_t), 0);
+	write_csv_file(fd, &pf->ctx_idx, sizeof(__u32), 0);
+	write_csv_file(fd, &pf->msg_tag, sizeof(__u32), 0);
+	write_csv_file(fd, &pf->tsp[0].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[0].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[1].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[1].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[2].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[2].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[3].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[3].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[4].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[4].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[5].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[5].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[6].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[6].tv_nsec, sizeof(long), 0);
+	write_csv_file(fd, &pf->tsp[7].tv_sec, sizeof(time_t), 0);
+	write_csv_file(fd, &pf->tsp[7].tv_nsec, sizeof(long), 1);
 #endif
 
 	return NULL;
@@ -3101,15 +3180,7 @@ static void *sva_sec_cipher_async(void *arg)
 	handle_t h_sess;
 	int ret;
 	int j;
-#ifdef WD_CIPHER_PERF
-	struct timespec sv[2];
-	int sc;
-#endif
 
-#ifdef WD_CIPHER_PERF
-	for (sc = 0; sc < 2; sc++)
-		timespec_clear(&sv[sc]);
-#endif
 	/* get resource */
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
@@ -3139,15 +3210,7 @@ try_do_again:
 		}
 		cnt--;
 		count++; // count means data block numbers
-#ifdef WD_CIPHER_PERF
-		for (sc = 0; sc < 2; sc++)
-			timespec_add(&sv[sc], &req->cv[sc], &sv[sc]);
-#endif
 	} while (cnt);
-#ifdef WD_CIPHER_PERF
-	for (sc = 0; sc < 2; sc++)
-		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timespec));
-#endif
 
 	ret = 0;
 out:
@@ -3158,54 +3221,44 @@ out:
 /* create poll threads */
 static void *sva_poll_func(void *arg)
 {
+	thread_data_t *pdata = (thread_data_t *)arg;
 	__u32 count = 0;
 	int ret;
 #ifdef WD_CIPHER_PERF
-	struct timespec begin, end, misc;
-	double sum, wait, rcv, get;
-	int sc, start = 0;
+	char *fname;
+	int fd;
 #endif
 
 	int expt = g_times * g_thread_num;
 
 #ifdef WD_CIPHER_PERF
-	for (sc = 0; sc < 4; sc++)
-		timespec_clear(&async_sv[sc]);
-	clock_gettime(CLOCK_REALTIME, &begin);
+	fname = gen_filename("async", "cipher", NULL);
+	if (!fname) {
+		SEC_TST_PRT("Wrong performance date filename is specified.\n");
+		goto out;
+	}
+	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
+	if (fd < 0) {
+		SEC_TST_PRT("Fail to open file (%s)\n", fname);
+		goto out;
+	}
+	free(fname);
+
+	pdata->pf_fd = fd;
 #endif
 	do {
-#ifdef WD_CIPHER_PERF
-		if (!count && !start) {
-			clock_gettime(CLOCK_REALTIME, &misc);
-		}
-#endif
 		ret = wd_cipher_poll(expt, &count);
-#ifdef WD_CIPHER_PERF
-		if (!ret || ret == -EAGAIN) {
-			if (count && !start) {
-				start = 1;
-				memcpy(&begin, &misc, sizeof(struct timespec));
-			}
-		}
-#endif
 		if (ret < 0 && ret != -EAGAIN) {
 			SEC_TST_PRT("poll ctx error: %d\n", ret);
 			break;
 		}
 	} while (expt > count);
+
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &end);
-	timespec_sub(&end, &begin, &end);
-	sum = end.tv_sec * 1000000000 + end.tv_nsec;
-	get = async_sv[0].tv_sec * 1000000000 + async_sv[0].tv_nsec;
-	wait = async_sv[1].tv_sec * 1000000000 + async_sv[1].tv_nsec;
-	rcv = async_sv[2].tv_sec * 1000000000 + async_sv[2].tv_nsec;
-	SEC_TST_PRT("Poll get %0.0f%%, wait %0.0f%%, receive %0.0f%%, other %0.0f%%\n",
-		get * 100 / sum,
-		wait * 100 / sum, rcv * 100 / sum,
-		(sum - get - wait - rcv) * 100 / sum);
+	close(fd);
 #endif
 
+out:
 	pthread_exit(NULL);
 
 	return NULL;
@@ -3241,7 +3294,7 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 		}
 	}
 
-	ret = pthread_create(&system_test_thrds[i], &attr, sva_poll_func, NULL);
+	ret = pthread_create(&system_test_thrds[i], &attr, sva_poll_func, &poll_thr_data);
 	if (ret) {
 		SEC_TST_PRT("Failed to create poll thread, ret:%d\n", ret);
 		return ret;
@@ -3261,26 +3314,6 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 		return ret;
 	}
 
-#ifdef WD_CIPHER_PERF
-	for (i = 0; i < thread_num; i++) {
-		SEC_TST_PRT("Average data of thread %d, P CTX:%0.0f ns, "
-			"SEND:%0.0f ns\n",
-			i,
-			(double)((thr_data[i].sv[0].tv_sec * 1000000000 \
-			+ thr_data[i].sv[0].tv_nsec) / g_times),
-			(double)((thr_data[i].sv[1].tv_sec * 1000000000 \
-			+ thr_data[i].sv[1].tv_nsec) / g_times));
-	}
-	SEC_TST_PRT("Poll thread, GET:%0.0f ns, WAIT:%0.0f ns, RECV:%0.0f ns, PUT:%0.0f ns\n",
-		((double)async_sv[0].tv_sec * 1000000000 \
-		+ async_sv[0].tv_nsec) / g_times,
-		((double)async_sv[1].tv_sec * 1000000000 \
-		+ async_sv[1].tv_nsec) / g_times,
-		((double)async_sv[2].tv_sec * 1000000000 \
-		+ async_sv[2].tv_nsec) / g_times,
-		((double)async_sv[3].tv_sec * 1000000000 \
-		+ async_sv[3].tv_nsec) / g_times);
-#endif
 	gettimeofday(&cur_tval, NULL);
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
 				cur_tval.tv_usec - start_tval.tv_usec);
@@ -3305,13 +3338,22 @@ static void *sva_sec_cipher_sync(void *arg)
 	int ret;
 	int j;
 #ifdef WD_CIPHER_PERF
-	struct timespec sv[5];
-	int sc;
+	struct wd_perf *pf;
+	char *fname;
+	char tname[8];
+	int fd;
 #endif
 
 #ifdef WD_CIPHER_PERF
-	for (sc = 0; sc < 5; sc++)
-		timespec_clear(&sv[sc]);
+	memset(&tname, 0, 8);
+	sprintf(tname, "t%d", pdata->tid);
+	fname = gen_filename("sync", "cipher", tname);
+	if (!fname)
+		return NULL;
+	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
+	free(fname);
+	if (fd < 0)
+		return NULL;
 #endif
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
@@ -3335,17 +3377,30 @@ static void *sva_sec_cipher_sync(void *arg)
 		pdata->send_task_num++;
 		count++;
 #ifdef WD_CIPHER_PERF
-		for (sc = 0; sc < 5; sc++)
-			timespec_add(&sv[sc], &req->cv[sc], &sv[sc]);
+		pf = &req->pf;
+		strcpy(pf->name, "SYN");
+		pf->tid = pdata->tid;
+		write_csv_file(fd, &pf->name, 4, 0);
+		write_csv_file(fd, &pf->tid, sizeof(pid_t), 0);
+		write_csv_file(fd, &pf->ctx_idx, sizeof(__u32), 0);
+		write_csv_file(fd, &pf->tsp[0].tv_sec, sizeof(time_t), 0);
+		write_csv_file(fd, &pf->tsp[0].tv_nsec, sizeof(long), 0);
+		write_csv_file(fd, &pf->tsp[1].tv_sec, sizeof(time_t), 0);
+		write_csv_file(fd, &pf->tsp[1].tv_nsec, sizeof(long), 0);
+		write_csv_file(fd, &pf->tsp[2].tv_sec, sizeof(time_t), 0);
+		write_csv_file(fd, &pf->tsp[2].tv_nsec, sizeof(long), 0);
+		write_csv_file(fd, &pf->tsp[3].tv_sec, sizeof(time_t), 0);
+		write_csv_file(fd, &pf->tsp[3].tv_nsec, sizeof(long), 0);
+		write_csv_file(fd, &pf->tsp[4].tv_sec, sizeof(time_t), 0);
+		write_csv_file(fd, &pf->tsp[4].tv_nsec, sizeof(long), 0);
+		write_csv_file(fd, &pf->tsp[5].tv_sec, sizeof(time_t), 0);
+		write_csv_file(fd, &pf->tsp[5].tv_nsec, sizeof(long), 1);
 #endif
 	}
-#ifdef WD_CIPHER_PERF
-	for (sc = 0; sc < 5; sc++)
-		memcpy(&pdata->sv[sc], &sv[sc], sizeof(struct timespec));
-#endif
 
 out:
 	wd_cipher_free_sess(h_sess);
+	close(fd);
 	return NULL;
 }
 
@@ -3387,29 +3442,6 @@ static int sva_sync_create_threads(int thread_num, struct wd_cipher_req *reqs,
 	}
 
 	gettimeofday(&cur_tval, NULL);
-#ifdef WD_CIPHER_PERF
-	for (i = 0; i < thread_num; i++) {
-		SEC_TST_PRT("Average data of thread %d, P CTX:%0.0f ns, "
-			"SEND:%0.0f ns, WAIT:%0.0f ns, "
-			"RECV:%0.0f ns, PUT:%0.0f ns\n",
-			i,
-			(double)((thr_data[i].sv[0].tv_sec * 1000000000 \
-			+ thr_data[i].sv[0].tv_nsec) / \
-			g_times),
-			(double)((thr_data[i].sv[1].tv_sec * 1000000000 \
-			+ thr_data[i].sv[1].tv_nsec) / \
-			g_times),
-			(double)((thr_data[i].sv[2].tv_sec * 1000000000 \
-			+ thr_data[i].sv[2].tv_nsec) / \
-			g_times),
-			(double)((thr_data[i].sv[3].tv_sec * 1000000000 \
-			+ thr_data[i].sv[3].tv_nsec) / \
-			g_times),
-			(double)((thr_data[i].sv[4].tv_sec * 1000000000 \
-			+ thr_data[i].sv[4].tv_nsec) / \
-			g_times));
-	}
-#endif
 
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
 				cur_tval.tv_usec - start_tval.tv_usec);

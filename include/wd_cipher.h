@@ -79,6 +79,16 @@ struct wd_cipher_sess {
 	int				numa;
 };
 
+#ifdef WD_CIPHER_PERF
+struct wd_perf {
+	char			name[4];
+	pid_t			tid;
+	__u32			ctx_idx;
+	__u32			msg_tag;
+	struct timespec		tsp[10];
+};
+#endif
+
 struct wd_cipher_req {
 	enum wd_cipher_op_type op_type;
 	union {
@@ -100,7 +110,7 @@ struct wd_cipher_req {
 	wd_alg_cipher_cb_t	*cb;
 	void			*cb_param;
 #ifdef WD_CIPHER_PERF
-	struct timespec		cv[6];
+	struct wd_perf		pf;
 #endif
 };
 

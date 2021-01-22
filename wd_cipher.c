@@ -314,7 +314,7 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	__u64 recv_cnt = 0;
 	int index, ret;
 #ifdef WD_CIPHER_PERF
-	struct timespec old, new, wait, rcv;
+	struct wd_perf *pf = &req->pf;
 #endif
 
 	if (unlikely(!sess || !req)) {
@@ -328,9 +328,9 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	}
 
 #ifdef WD_CIPHER_PERF
-	timespec_clear(&wait);
-	timespec_clear(&rcv);
-	clock_gettime(CLOCK_REALTIME, &old);
+	memset(pf, 0, sizeof(struct wd_perf));
+	/* TSP0: pre get context */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[0]);
 #endif
 	key.mode = CTX_MODE_SYNC;
 	key.type = 0;
@@ -346,9 +346,8 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
                 return -EINVAL;
         }
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &new);
-	timespec_sub(&new, &old, &req->cv[0]);
-	memcpy(&old, &new, sizeof(struct timespec));
+	/* TSP1: post get context */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[1]);
 #endif
 
 	memset(&msg, 0, sizeof(struct wd_cipher_msg));
@@ -361,25 +360,20 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 		return ret;
 	}
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &new);
-	timespec_sub(&new, &old, &req->cv[1]);
-	memcpy(&old, &new, sizeof(struct timespec));
+	/* TSP2: post send request */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[2]);
+	pf->ctx_idx = index;
 #endif
 
 	do {
+#ifdef WD_CIPHER_PERF
+		/* TSP3: pre receive request */
+		clock_gettime(CLOCK_REALTIME, &pf->tsp[3]);
+#endif
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx, &msg);
 #ifdef WD_CIPHER_PERF
-		clock_gettime(CLOCK_REALTIME, &new);
-		if (ret) {
-			/* accumulate wait time */
-			timespec_sub(&new, &old, &old);
-			timespec_add(&wait, &old, &wait);
-		} else {
-			/* accumulate receive time */
-			timespec_sub(&new, &old, &old);
-			timespec_add(&rcv, &old, &rcv);
-		}
-		memcpy(&old, &new, sizeof(struct timespec));
+		/* TSP4: post receive request */
+		clock_gettime(CLOCK_REALTIME, &pf->tsp[4]);
 #endif
 		if (ret == -WD_HW_EACCESS) {
 			WD_ERR("wd cipher recv err!\n");
@@ -395,11 +389,8 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 
 	wd_cipher_setting.sched.put_ctx(h_ctx, index);
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &new);
-	memcpy(&req->cv[2], &wait, sizeof(struct timespec));
-	memcpy(&req->cv[3], &rcv, sizeof(struct timespec));
-	timespec_sub(&new, &old, &req->cv[4]);
-	memcpy(&old, &new, sizeof(struct timespec));
+	/* TSP5: post release context */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[5]);
 #endif
 
 	return 0;
@@ -419,7 +410,7 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	int idx, ret;
 	__u32 index;
 #ifdef WD_CIPHER_PERF
-	struct timespec old, new;
+	struct wd_perf *pf = &req->pf;
 #endif
 
 	if (unlikely(!sess || !req || !req->cb)) {
@@ -437,7 +428,9 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	key.numa_id = sess->numa;
 
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &old);
+	memset(pf, 0, sizeof(struct wd_perf));
+	/* TSP0: pre get context */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[0]);
 #endif
 	index = wd_cipher_setting.sched.pick_next_ctx(h_ctx, req, &key);
 	if (unlikely(index >= config->ctx_num)) {
@@ -458,12 +451,19 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	fill_request_msg(msg, req, sess);
 	msg->tag = idx;
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &new);
-	timespec_sub(&new, &old, &req->cv[0]);
-	memcpy(&old, &new, sizeof(struct timespec));
+	/* TSP1: post get context */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[1]);
+	strcpy(pf->name, "ASY");
+	pf->tid = gettid();
+	pf->ctx_idx = index;
+	pf->msg_tag = msg->tag;
 #endif
 
 	ret = wd_cipher_setting.driver->cipher_send(ctx->ctx, msg);
+#ifdef WD_CIPHER_PERF
+	/* TSP2: post send request */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[2]);
+#endif
 	wd_cipher_setting.sched.put_ctx(h_ctx, index);
 	if (ret < 0) {
 		if (ret != -EBUSY)
@@ -471,8 +471,8 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 		wd_put_msg_to_pool(&wd_cipher_setting.pool, index, msg->tag);
 	}
 #ifdef WD_CIPHER_PERF
-	clock_gettime(CLOCK_REALTIME, &new);
-	timespec_sub(&new, &old, &req->cv[1]);
+	/* TSP3: post release context */
+	clock_gettime(CLOCK_REALTIME, &pf->tsp[3]);
 #endif
 
 	return ret;
@@ -487,7 +487,9 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	handle_t h_ctx = wd_cipher_setting.sched.h_sched_ctx;
 	int ret = 0;
 #ifdef WD_CIPHER_PERF
-	struct timespec old, new, wait, rcv, put, get;
+	struct wd_perf *pf;
+	struct timespec pre_get, post_get, pre_rcv, post_rcv;
+	int multi = 0;
 #endif
 
 	if (unlikely(index >= config->ctx_num || !count)) {
@@ -496,69 +498,53 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 	}
 
 #ifdef WD_CIPHER_PERF
-	timespec_clear(&get);
-	timespec_clear(&put);
-	timespec_clear(&wait);
-	timespec_clear(&rcv);
-	clock_gettime(CLOCK_REALTIME, &old);
+	clock_gettime(CLOCK_REALTIME, &pre_get);
+	ret = wd_cipher_setting.sched.try_get_ctx(h_ctx, index);
+	if (ret)
+		return ret;
+	clock_gettime(CLOCK_REALTIME, &post_get);
 #endif
 	do {
 		memset(&resp_msg, 0, sizeof(struct wd_cipher_msg));
-		ret = wd_cipher_setting.sched.try_get_ctx(h_ctx, index);
-		if (ret)
-			return ret;
 #ifdef WD_CIPHER_PERF
-		clock_gettime(CLOCK_REALTIME, &new);
-		timespec_sub(&new, &old, &old);
-		timespec_add(&get, &old, &get);
-		memcpy(&old, &new, sizeof(struct timespec));
+		clock_gettime(CLOCK_REALTIME, &pre_rcv);
 #endif
 		ret = wd_cipher_setting.driver->cipher_recv(ctx->ctx,
 							    &resp_msg);
 #ifdef WD_CIPHER_PERF
-		clock_gettime(CLOCK_REALTIME, &new);
-		if (ret) {
-			/* accumulate wait time */
-			timespec_sub(&new, &old, &old);
-			timespec_add(&wait, &old, &wait);
-		} else {
-			/* accumulate receive time */
-			timespec_sub(&new, &old, &old);
-			timespec_add(&rcv, &old, &rcv);
-		}
-		memcpy(&old, &new, sizeof(struct timespec));
+		clock_gettime(CLOCK_REALTIME, &post_rcv);
 #endif
-		wd_cipher_setting.sched.put_ctx(h_ctx, index);
 		if (ret < 0) {
 			if (ret != -EAGAIN)
 				WD_ERR("wd cipher recv hw err!\n");
-			return ret;
+			goto out;
 		}
-#ifdef WD_CIPHER_PERF
-		clock_gettime(CLOCK_REALTIME, &new);
-		timespec_sub(&new, &old, &old);
-		timespec_add(&put, &old, &put);
-		memcpy(&old, &new, sizeof(struct timespec));
-#endif
 		msg = wd_find_msg_in_pool(&wd_cipher_setting.pool, index,
 					  resp_msg.tag);
 		if (!msg) {
 			WD_ERR("failed to get msg from pool!\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
 
 		msg->tag = resp_msg.tag;
 		req = &msg->req;
 
 #ifdef WD_CIPHER_PERF
-		memcpy(&req->cv[2], &get, sizeof(struct timespec));
-		memcpy(&req->cv[3], &wait, sizeof(struct timespec));
-		memcpy(&req->cv[4], &rcv, sizeof(struct timespec));
-		memcpy(&req->cv[5], &put, sizeof(struct timespec));
-		timespec_clear(&get);
-		timespec_clear(&put);
-		timespec_clear(&wait);
-		timespec_clear(&rcv);
+		/*
+		 * TSP4: pre get context for receive
+		 * TSP5: post get context for receive
+		 * TSP6: pre receive request
+		 * TSP7: post receive request
+		 */
+		pf = &req->pf;
+		if (!multi) {
+			multi = 1;
+			memcpy(&pf->tsp[4], &pre_get, sizeof(struct timespec));
+			memcpy(&pf->tsp[5], &post_get, sizeof(struct timespec));
+		}
+		memcpy(&pf->tsp[6], &pre_rcv, sizeof(struct timespec));
+		memcpy(&pf->tsp[7], &post_rcv, sizeof(struct timespec));
 #endif
 		req->cb(req, req->cb_param);
 		/* free msg cache to msg_pool */
@@ -568,6 +554,8 @@ int wd_cipher_poll_ctx(__u32 index, __u32 expt, __u32* count)
 		(*count)++;
 
 	} while (expt > *count);
+out:
+	wd_cipher_setting.sched.put_ctx(h_ctx, index);
 
 	return ret;
 }
