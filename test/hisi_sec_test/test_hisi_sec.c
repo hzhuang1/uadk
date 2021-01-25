@@ -4,10 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/syscall.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "test_hisi_sec.h"
 #include "wd_cipher.h"
@@ -29,6 +31,8 @@
 #define TEST_WORD_LEN	4096
 #define MAX_ALGO_PER_TYPE 12
 #define MIN_SVA_BD_NUM	1
+
+#define WINDOW_SIZE	1024
 
 static struct wd_ctx_config g_ctx_cfg;
 static struct wd_sched *g_sched;
@@ -74,7 +78,14 @@ typedef struct _thread_data_t {
 	unsigned long long recv_task_num;
 #ifdef WD_CIPHER_PERF
 	int	pf_fd;
+	int	pf_td;		/* fd of tmp file */
 	pid_t	pf_tid;
+	struct wd_perf	*pf_data;
+	/*
+	 * entry index
+	 */
+	int	pf_idx;		/* entry index */
+	int	pf_entries;	/* entry numbers for one area. i.e: 1024 */
 #endif
 } thread_data_t;
 
@@ -158,21 +169,126 @@ char *gen_filename(char *mode, char *type, char *usr)
 	return name;
 }
 
-static int write_csv_file(int fd, void *src, size_t len, int newline)
+/*
+ * CSV file format is MS-DOS type. All fields must be text.
+ */
+static int write_pf_to_csv(int fd, struct wd_perf *pf)
 {
+	char buf[65];
+	int i, n, ret;
+
+	if (strncmp(pf->name, "SYNC", 4) && strncmp(pf->name, "ASYN", 4)) {
+		SEC_TST_PRT("Invalid data (%4s)\n", pf->name);
+		return -EINVAL;
+	}
+	ret = write(fd, &pf->name, 4);
+	if (ret < 0)
+		return ret;
+	n = sprintf(buf, ",%d", pf->tid);
+	ret = write(fd, buf, n);
+	if (ret < 0)
+		return ret;
+	n = sprintf(buf, ",%d", pf->ctx_idx);
+	ret = write(fd, buf, n);
+	if (ret < 0)
+		return ret;
+	n = sprintf(buf, ",%d", pf->msg_tag);
+	ret = write(fd, buf, n);
+	if (ret < 0)
+		return ret;
+	for (i = 0; i < 8; i++) {
+		n = sprintf(buf, ",%ld", pf->tsp[i].tv_sec);
+		ret = write(fd, buf, n);
+		if (ret < 0)
+			return ret;
+		n = sprintf(buf, ",%ld", pf->tsp[i].tv_nsec);
+		ret = write(fd, buf, n);
+		if (ret < 0)
+			return ret;
+	}
+	ret = write(fd, "\r\n", 2);
+	if (ret < 0)
+		return ret;
+	return 0;
+}
+
+
+/*
+ * Export performance data from tmp file to CSV file.
+ */
+static int export_csv_file(thread_data_t *data, int num)
+{
+	struct stat stat_buf;
+	struct wd_perf pf;
+	int i, ret, step, v;
+	off_t size;
+
+	step = sizeof(struct wd_perf);
+	/* loop these threads */
+	for (i = 0; i < num; i++) {
+		ret = fstat(data[i].pf_td, &stat_buf);
+		if (ret < 0) {
+			SEC_TST_PRT("Fail to get stat from thread %d (%d)\n",
+				    i, ret);
+			return ret;
+		}
+		lseek(data[i].pf_td, 0, SEEK_SET);
+		/* dump performance data from tmp file */
+		for (size = 0; size < stat_buf.st_size; size += step) {
+			ret = read(data[i].pf_td, &pf, step);
+			if (ret < 0) {
+				SEC_TST_PRT("Fail to read from tmp file.\n");
+				return ret;
+			}
+			ret = write_pf_to_csv(data[i].pf_fd, &pf);
+			if (ret < 0) {
+				SEC_TST_PRT("Fail to write to csv file.\n");
+				return ret;
+			}
+		}
+		/* dump performance data that is not cached in tmp file yet */
+		for (v = 0; v < data[i].pf_idx; v++) {
+			ret = write_pf_to_csv(data[i].pf_fd,
+					      &data[i].pf_data[v]);
+			if (ret < 0) {
+				SEC_TST_PRT("Fail to write to csv file.\n");
+				return ret;
+			}
+		}
+	}
+	return 0;
+}
+
+static void *async_cb(struct wd_cipher_req *req, void *data)
+{
+	/* Dump performance data into CSV file. */
+	thread_data_t *pdata = (thread_data_t *)data;
+	struct wd_perf *pf = &req->pf;
+	int step = sizeof(struct wd_perf);
 	int ret;
 
-	ret = write(fd, src, len);
+	memcpy(pf->name, "ASYN", 4);
+	memcpy(&pdata->pf_data[pdata->pf_idx], pf, step);
+	pdata->pf_idx++;
+	if (pdata->pf_idx == WINDOW_SIZE) {
+		ret = write(pdata->pf_td, &pdata->pf_data[0],
+			    WINDOW_SIZE * step);
+		pdata->pf_idx = 0;
+	}
 	if (ret < 0)
-		goto out;
-	if (newline)
-		ret = write(fd, "\r\n", 2);
-	else
-		ret = write(fd, ",", 1);
-out:
-	if (ret < 0)
-		WD_ERR("Fail to write to CSV file! (%d)\n", ret);
-	return ret;
+		SEC_TST_PRT("Fail to write tmp file: (%d)\n", ret);
+
+	return NULL;
+}
+#else
+static int export_csv_file(thread_data_t *data, int num)
+{
+	return 0;
+}
+
+static void *async_cb(struct wd_cipher_req *req, void *data)
+{
+	return NULL;
 }
 #endif
 
@@ -652,39 +768,6 @@ out:
 	uninit_config();
 
 	return ret;
-}
-
-static void *async_cb(struct wd_cipher_req *req, void *data)
-{
-#ifdef WD_CIPHER_PERF
-	/* Dump performance data into CSV file. */
-	thread_data_t *pdata = (thread_data_t *)data;
-	struct wd_perf *pf = &req->pf;
-	int fd = pdata->pf_fd;
-
-	write_csv_file(fd, &pf->name, 4, 0);
-	write_csv_file(fd, &pf->tid, sizeof(pid_t), 0);
-	write_csv_file(fd, &pf->ctx_idx, sizeof(__u32), 0);
-	write_csv_file(fd, &pf->msg_tag, sizeof(__u32), 0);
-	write_csv_file(fd, &pf->tsp[0].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[0].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[1].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[1].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[2].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[2].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[3].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[3].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[4].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[4].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[5].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[5].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[6].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[6].tv_nsec, sizeof(long), 0);
-	write_csv_file(fd, &pf->tsp[7].tv_sec, sizeof(time_t), 0);
-	write_csv_file(fd, &pf->tsp[7].tv_nsec, sizeof(long), 1);
-#endif
-
-	return NULL;
 }
 
 static int test_sec_cipher_async_once(void)
@@ -3247,16 +3330,48 @@ static int sva_async_create_threads(int thread_num, thread_data_t *tds)
 	float speed, time_used;
 	pthread_attr_t attr;
 	int i, ret;
+#ifdef WD_CIPHER_PERF
+	char *fname;
+	char tname[64];
+#endif
 
 	if (thread_num > SVA_THREADS) {
 		SEC_TST_PRT("can't creat %d threads", thread_num);
 		return -EINVAL;
 	}
 
+#ifdef WD_CIPHER_PERF
+	fname = gen_filename("async", "cipher", NULL);
+	if (!fname) {
+		SEC_TST_PRT("Wrong performance date filename is specified.\n");
+		return -EINVAL;
+	}
+	poll_thr_data.pf_fd = open(fname,
+				   O_CREAT | O_TRUNC | O_APPEND | O_RDWR,
+				   0666);
+	if (poll_thr_data.pf_fd < 0) {
+		SEC_TST_PRT("Fail to open file (%s)\n", fname);
+		free(fname);
+		return poll_thr_data.pf_fd;
+	}
+	free(fname);
+	sprintf(tname, "/tmp/temp-XXXXXX");
+	poll_thr_data.pf_td = mkstemp(tname);
+	if (poll_thr_data.pf_td < 0)
+		return poll_thr_data.pf_fd;
+
+	poll_thr_data.pf_data = calloc(1, sizeof(struct wd_perf) * WINDOW_SIZE);
+	if (!poll_thr_data.pf_data)
+		return -ENOMEM;
+#endif
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	gettimeofday(&start_tval, NULL);
 	for (i = 0; i < thread_num; i++) {
+#ifdef WD_CIPHER_PERF
+		tds[i].pf_td = poll_thr_data.pf_td;
+		tds[i].pf_data = poll_thr_data.pf_data;
+#endif
 		ret = pthread_create(&system_test_thrds[i], &attr,
 				     sva_sec_cipher_async, &tds[i]);
 		if (ret) {
@@ -3265,7 +3380,8 @@ static int sva_async_create_threads(int thread_num, thread_data_t *tds)
 		}
 	}
 
-	ret = pthread_create(&system_test_thrds[i], &attr, sva_poll_func, &poll_thr_data);
+	ret = pthread_create(&system_test_thrds[i], &attr, sva_poll_func,
+			     &poll_thr_data);
 	if (ret) {
 		SEC_TST_PRT("Failed to create poll thread, ret:%d\n", ret);
 		return ret;
@@ -3288,12 +3404,14 @@ static int sva_async_create_threads(int thread_num, thread_data_t *tds)
 	gettimeofday(&cur_tval, NULL);
 	time_used = (double)((cur_tval.tv_sec - start_tval.tv_sec) * 1000000 +
 				cur_tval.tv_usec - start_tval.tv_usec);
-	SEC_TST_PRT("time_used:%0.0f us, send task num:%llu\n", time_used, g_times * g_thread_num);
+	SEC_TST_PRT("time_used:%0.0f us, send task num:%llu\n",
+		    time_used, g_times * g_thread_num);
 	speed = g_times * g_thread_num / time_used * 1000000;
 	Perf = speed * g_pktlen / 1024; //B->KB
 	SEC_TST_PRT("Async mode Pro-%d, thread_id-%d, speed:%f ops, Perf: %ld KB/s\n",
 		getpid(), thread_id, speed, Perf);
 
+	export_csv_file(&poll_thr_data, 1);
 	return 0;
 }
 
@@ -3310,19 +3428,18 @@ static void *sva_sec_cipher_sync(void *arg)
 	int j;
 #ifdef WD_CIPHER_PERF
 	struct wd_perf *pf;
-	int fd = pdata->pf_fd;
 #endif
 
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
 	h_sess = wd_cipher_alloc_sess(setup);
 	if (!h_sess)
-		return NULL;
+		goto out_sess;
 
 	ret = wd_cipher_set_key(h_sess, (const __u8*)tv->key, tv->klen);
 	if (ret) {
 		SEC_TST_PRT("test sec cipher set key is failed!\n");
-		goto out;;
+		goto out_key;
 	}
 
 	/* run task */
@@ -3336,28 +3453,24 @@ static void *sva_sec_cipher_sync(void *arg)
 		count++;
 #ifdef WD_CIPHER_PERF
 		pf = &req->pf;
-		strcpy(pf->name, "SYN");
+		memcpy(pf->name, "SYNC", 4);
 		pf->tid = pdata->tid;
-		write_csv_file(fd, &pf->name, 4, 0);
-		write_csv_file(fd, &pf->tid, sizeof(pid_t), 0);
-		write_csv_file(fd, &pf->ctx_idx, sizeof(__u32), 0);
-		write_csv_file(fd, &pf->tsp[0].tv_sec, sizeof(time_t), 0);
-		write_csv_file(fd, &pf->tsp[0].tv_nsec, sizeof(long), 0);
-		write_csv_file(fd, &pf->tsp[1].tv_sec, sizeof(time_t), 0);
-		write_csv_file(fd, &pf->tsp[1].tv_nsec, sizeof(long), 0);
-		write_csv_file(fd, &pf->tsp[2].tv_sec, sizeof(time_t), 0);
-		write_csv_file(fd, &pf->tsp[2].tv_nsec, sizeof(long), 0);
-		write_csv_file(fd, &pf->tsp[3].tv_sec, sizeof(time_t), 0);
-		write_csv_file(fd, &pf->tsp[3].tv_nsec, sizeof(long), 0);
-		write_csv_file(fd, &pf->tsp[4].tv_sec, sizeof(time_t), 0);
-		write_csv_file(fd, &pf->tsp[4].tv_nsec, sizeof(long), 0);
-		write_csv_file(fd, &pf->tsp[5].tv_sec, sizeof(time_t), 0);
-		write_csv_file(fd, &pf->tsp[5].tv_nsec, sizeof(long), 1);
+		memcpy(&pdata->pf_data[pdata->pf_idx], pf,
+		       sizeof(struct wd_perf));
+		pdata->pf_idx++;
+		if (pdata->pf_idx == WINDOW_SIZE) {
+			ret = write(pdata->pf_td, &pdata->pf_data[0],
+				    WINDOW_SIZE * sizeof(struct wd_perf));
+			pdata->pf_idx = 0;
+		}
+		if (ret < 0)
+			SEC_TST_PRT("Fail to write tmp file: (%d)\n", ret);
 #endif
 	}
 
-out:
+out_key:
 	wd_cipher_free_sess(h_sess);
+out_sess:
 	return NULL;
 }
 
@@ -3369,12 +3482,25 @@ static int sva_sync_create_threads(int thread_num, thread_data_t *tds)
 	float speed, time_used;
 	pthread_attr_t attr;
 	int i, ret;
+#ifdef WD_CIPHER_PERF
+	int fd;
+	char *fname;
+#endif
 
 	if (thread_num > SVA_THREADS) {
 		SEC_TST_PRT("can't creat %d threads", thread_num);
 		return -EINVAL;
 	}
 
+#ifdef WD_CIPHER_PERF
+	fname = gen_filename("sync", "cipher", NULL);
+	if (!fname)
+		return -EINVAL;
+	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
+	free(fname);
+	if (fd < 0)
+		return fd;
+#endif
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	gettimeofday(&start_tval, NULL);
@@ -3402,6 +3528,7 @@ static int sva_sync_create_threads(int thread_num, thread_data_t *tds)
 	Perf = speed * g_pktlen / 1024; //B->KB
 	SEC_TST_PRT("Sync mode avg Pro-%d, thread_id-%d, speed:%f ops, Perf: %ld KB/s\n",
 		getpid(), thread_id, speed, Perf);
+	export_csv_file(&thr_data[0], thread_num);
 
 	return 0;
 }
@@ -3423,7 +3550,8 @@ static int sec_sva_test(void)
 	int cpsize;
 	int ret;
 #ifdef WD_CIPHER_PERF
-	char *fname;
+	char *fname = NULL;
+	char tname[64];
 	int fd;
 #endif
 
@@ -3482,11 +3610,9 @@ static int sec_sva_test(void)
 	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
 	if (fd < 0) {
 		SEC_TST_PRT("Fail to open file (%s)\n", fname);
-		free(fname);
 		ret = fd;
 		goto out_thr;
 	}
-	free(fname);
 	poll_thr_data.pf_fd = fd;
 #endif
 	for (i = 0; i < threads; i++) {
@@ -3523,6 +3649,18 @@ static int sec_sva_test(void)
 		datas[i].setup = &setup[i];
 #ifdef WD_CIPHER_PERF
 		datas[i].pf_fd = fd;
+		if (g_syncmode == 0) {
+			memset(&tname, 0, 64);
+			sprintf(tname, "/tmp/temp-XXXXXX");
+			datas[i].pf_td = mkstemp(tname);
+			if (datas[i].pf_td < 0)
+				goto out_thr;
+			datas[i].pf_data = calloc(1,
+						 sizeof(struct wd_perf) *
+						  WINDOW_SIZE);
+			if (!datas[i].pf_data)
+				goto out_thr;
+		}
 #endif
 	}
 
@@ -3539,9 +3677,31 @@ out_config:
 #endif
 	uninit_config();
 out_thr:
-	for (j = i - 1; j >= 0; j--) {
-		free_bd_pool(&datas[j]);
+#ifdef WD_CIPHER_PERF
+	if (fname)
+		free(fname);
+#endif
+#ifdef WD_CIPHER_PERF
+	if (g_syncmode == 0) {
+		for (j = i - 1; j >= 0; j--) {
+			free_bd_pool(&datas[j]);
+			if (datas[j].pf_data)
+				free(datas[j].pf_data);
+			if (datas[j].pf_td > 0)
+				close(datas[j].pf_td);
+		}
+	} else {
+		for (j = i - 1; j >= 0; j--)
+			free_bd_pool(&datas[j]);
+		if (datas[0].pf_data)
+			free(datas[0].pf_data);
+		if (datas[0].pf_td > 0)
+			close(datas[0].pf_td);
 	}
+#else
+	for (j = i - 1; j >= 0; j--)
+		free_bd_pool(&datas[j]);
+#endif
 
 	if (src)
 		free(src);

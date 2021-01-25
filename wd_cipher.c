@@ -453,7 +453,6 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 #ifdef WD_CIPHER_PERF
 	/* TSP1: post get context */
 	clock_gettime(CLOCK_REALTIME, &pf->tsp[1]);
-	strcpy(pf->name, "ASY");
 	pf->tid = gettid();
 	pf->ctx_idx = index;
 	pf->msg_tag = msg->tag;

@@ -85,7 +85,7 @@ struct wd_perf {
 	pid_t			tid;
 	__u32			ctx_idx;
 	__u32			msg_tag;
-	struct timespec		tsp[10];
+	struct timespec		tsp[8];
 };
 #endif
 
