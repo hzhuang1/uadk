@@ -3184,10 +3184,12 @@ static void *sva_poll_func(void *arg)
 			SEC_TST_PRT("poll ctx error: %d\n", ret);
 			break;
 		}
+#ifdef WD_CIPHER_PERF
 		if (count && !start) {
 			start = 1;
 			timersub(&misc, &begin, &misc);
 		}
+#endif
 	} while (expt > count);
 #ifdef WD_CIPHER_PERF
 	gettimeofday(&end, NULL);
