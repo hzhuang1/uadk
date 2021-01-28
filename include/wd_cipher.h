@@ -2,7 +2,7 @@
 #ifndef __WD_CIPHER_H
 #define __WD_CIPHER_H
 
-#define WD_CIPHER_PERF
+//#define WD_CIPHER_PERF
 
 #include <dlfcn.h>
 #include <sys/time.h>
