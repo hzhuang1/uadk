@@ -166,11 +166,11 @@ static int write_csv_file(int fd, void *src, size_t len, int newline)
 	if (ret < 0)
 		goto out;
 	if (newline)
-		ret = write(fd, "\n", 1);
+		ret = write(fd, "\r\n", 2);
 	else
 		ret = write(fd, ",", 1);
 out:
-	if (ret)
+	if (ret < 0)
 		WD_ERR("Fail to write to CSV file! (%d)\n", ret);
 	return ret;
 }
@@ -3221,31 +3221,11 @@ out:
 /* create poll threads */
 static void *sva_poll_func(void *arg)
 {
-	thread_data_t *pdata = (thread_data_t *)arg;
 	__u32 count = 0;
 	int ret;
-#ifdef WD_CIPHER_PERF
-	char *fname;
-	int fd;
-#endif
 
 	int expt = g_times * g_thread_num;
 
-#ifdef WD_CIPHER_PERF
-	fname = gen_filename("async", "cipher", NULL);
-	if (!fname) {
-		SEC_TST_PRT("Wrong performance date filename is specified.\n");
-		goto out;
-	}
-	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
-	if (fd < 0) {
-		SEC_TST_PRT("Fail to open file (%s)\n", fname);
-		goto out;
-	}
-	free(fname);
-
-	pdata->pf_fd = fd;
-#endif
 	do {
 		ret = wd_cipher_poll(expt, &count);
 		if (ret < 0 && ret != -EAGAIN) {
@@ -3254,18 +3234,12 @@ static void *sva_poll_func(void *arg)
 		}
 	} while (expt > count);
 
-#ifdef WD_CIPHER_PERF
-	close(fd);
-#endif
-
-out:
 	pthread_exit(NULL);
 
 	return NULL;
 }
 
-static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
-	struct wd_cipher_sess_setup *setups, thread_data_t *tds)
+static int sva_async_create_threads(int thread_num, thread_data_t *tds)
 {
 	int thread_id = (int)syscall(__NR_gettid);
 	struct timeval start_tval, cur_tval;
@@ -3283,11 +3257,8 @@ static int sva_async_create_threads(int thread_num, struct wd_cipher_req *reqs,
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	gettimeofday(&start_tval, NULL);
 	for (i = 0; i < thread_num; i++) {
-		thr_data[i].tid = i;
-		thr_data[i].req = &reqs[i];
-		thr_data[i].setup = &setups[i];
-		thr_data[i].bd_pool = tds[i].bd_pool;
-		ret = pthread_create(&system_test_thrds[i], &attr, sva_sec_cipher_async, &thr_data[i]);
+		ret = pthread_create(&system_test_thrds[i], &attr,
+				     sva_sec_cipher_async, &tds[i]);
 		if (ret) {
 			SEC_TST_PRT("Failed to create thread, ret:%d\n", ret);
 			return ret;
@@ -3339,22 +3310,9 @@ static void *sva_sec_cipher_sync(void *arg)
 	int j;
 #ifdef WD_CIPHER_PERF
 	struct wd_perf *pf;
-	char *fname;
-	char tname[8];
-	int fd;
+	int fd = pdata->pf_fd;
 #endif
 
-#ifdef WD_CIPHER_PERF
-	memset(&tname, 0, 8);
-	sprintf(tname, "t%d", pdata->tid);
-	fname = gen_filename("sync", "cipher", tname);
-	if (!fname)
-		return NULL;
-	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
-	free(fname);
-	if (fd < 0)
-		return NULL;
-#endif
 	ret = get_cipher_resource(&tv, (int *)&setup->alg, (int *)&setup->mode);
 
 	h_sess = wd_cipher_alloc_sess(setup);
@@ -3400,12 +3358,10 @@ static void *sva_sec_cipher_sync(void *arg)
 
 out:
 	wd_cipher_free_sess(h_sess);
-	close(fd);
 	return NULL;
 }
 
-static int sva_sync_create_threads(int thread_num, struct wd_cipher_req *reqs,
-	struct wd_cipher_sess_setup *setups, thread_data_t *tds)
+static int sva_sync_create_threads(int thread_num, thread_data_t *tds)
 {
 	int thread_id = (int)syscall(__NR_gettid);
 	struct timeval start_tval, cur_tval;
@@ -3423,12 +3379,8 @@ static int sva_sync_create_threads(int thread_num, struct wd_cipher_req *reqs,
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	gettimeofday(&start_tval, NULL);
 	for (i = 0; i < thread_num; i++) {
-		thr_data[i].tid = i;
-		thr_data[i].req = &reqs[i];
-		thr_data[i].setup = &setups[i];
-		thr_data[i].bd_pool = tds[i].bd_pool;
 		ret = pthread_create(&system_test_thrds[i], &attr,
-			sva_sec_cipher_sync, &thr_data[i]);
+				     sva_sec_cipher_sync, &tds[i]);
 		if (ret) {
 			SEC_TST_PRT("Failed to create thread, ret:%d\n", ret);
 			return ret;
@@ -3470,6 +3422,10 @@ static int sec_sva_test(void)
 	int step;
 	int cpsize;
 	int ret;
+#ifdef WD_CIPHER_PERF
+	char *fname;
+	int fd;
+#endif
 
 	memset(datas, 0, sizeof(thread_data_t) * g_thread_num);
 	memset(req, 0, sizeof(struct wd_cipher_req) * g_thread_num);
@@ -3513,6 +3469,26 @@ static int sec_sva_test(void)
 	if (step > BUFF_SIZE)
 		cpsize = BUFF_SIZE;
 
+#ifdef WD_CIPHER_PERF
+	if (g_syncmode == 0)
+		fname = gen_filename("sync", "cipher", NULL);
+	else
+		fname = gen_filename("async", "cipher", NULL);
+	if (!fname) {
+		SEC_TST_PRT("Wrong performance date filename is specified.\n");
+		ret = -EINVAL;
+		goto out_thr;
+	}
+	fd = open(fname, O_CREAT | O_TRUNC | O_APPEND | O_RDWR, 0666);
+	if (fd < 0) {
+		SEC_TST_PRT("Fail to open file (%s)\n", fname);
+		free(fname);
+		ret = fd;
+		goto out_thr;
+	}
+	free(fname);
+	poll_thr_data.pf_fd = fd;
+#endif
 	for (i = 0; i < threads; i++) {
 		req[i].src = src + i * step;
 		memcpy(req[i].src, tv->ptext, cpsize);
@@ -3541,16 +3517,26 @@ static int sec_sva_test(void)
 		}
 		req[i].cb = async_cb;
 		req[i].cb_param = &datas[i];
+
+		datas[i].tid = i;
+		datas[i].req = &req[i];
+		datas[i].setup = &setup[i];
+#ifdef WD_CIPHER_PERF
+		datas[i].pf_fd = fd;
+#endif
 	}
 
 	if (g_syncmode == 0)
-		ret = sva_sync_create_threads(threads, req, setup, datas);
+		ret = sva_sync_create_threads(threads, datas);
 	else
-		ret = sva_async_create_threads(threads, req, setup, datas);
+		ret = sva_async_create_threads(threads, datas);
 	if (ret < 0)
 		goto out_config;
 
 out_config:
+#ifdef WD_CIPHER_PERF
+	close(fd);
+#endif
 	uninit_config();
 out_thr:
 	for (j = i - 1; j >= 0; j--) {
