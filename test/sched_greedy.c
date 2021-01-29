@@ -56,6 +56,22 @@ static inline struct sched_ctx_region *get_region(handle_t h_sched, __u8 type,
 	return &info->region[i];
 }
 
+
+int get_pos_in_region(struct sched_ctx_region *region)
+{
+	int off;
+
+	if (!region->ctx_pool || !region->num) {
+		return -EINVAL;
+	}
+
+	off = (region->last + 1) % region->num;
+	pthread_mutex_lock(&region->ctx_pool[off].lock);
+	region->last = off;
+	return region->last;
+}
+
+#if 0
 int get_pos_in_region(struct sched_ctx_region *region)
 {
 #if 0
@@ -96,6 +112,7 @@ int get_pos_in_region(struct sched_ctx_region *region)
 #endif
 	return region->last;
 }
+#endif
 
 __u32 convert_unique_pos(handle_t h_sched, int region_idx, int offs)
 {
