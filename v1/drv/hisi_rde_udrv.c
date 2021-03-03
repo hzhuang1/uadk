@@ -14,11 +14,11 @@
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 
-#include "wd.h"
-#include "wd_util.h"
-#include "wd_ec.h"
-#include "wd_ec_util.h"
-#include "hisi_qm_udrv.h"
+#include "v1/wd.h"
+#include "v1/wd_util.h"
+#include "v1/wd_ec.h"
+#include "v1/wd_ec_util.h"
+#include "hisi_qm_udrv_v1.h"
 #include "hisi_rde_udrv.h"
 
 static __u16 g_ref_cnt;

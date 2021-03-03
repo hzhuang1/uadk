@@ -7,7 +7,7 @@
 #include "wd_util.h"
 #include "wd_adapter.h"
 #include "./drv/dummy_drv.h"
-#include "./drv/hisi_qm_udrv.h"
+#include "./drv/hisi_qm_udrv_v1.h"
 
 #define __ALIGN_MASK(x, mask)  (((x) + (mask)) & ~(mask))
 #define ALIGN(x, a) __ALIGN_MASK(x, (typeof(x))(a)-1)

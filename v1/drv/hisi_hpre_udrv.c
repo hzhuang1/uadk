@@ -13,7 +13,7 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/types.h>
-#include "wd_util.h"
+#include "v1/wd_util.h"
 #include "hisi_hpre_udrv.h"
 
 static int qm_crypto_bin_to_hpre_bin(char *dst, const char *src,

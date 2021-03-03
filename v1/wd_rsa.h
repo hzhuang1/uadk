@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <linux/types.h>
-#include "wd.h"
+#include "v1/wd.h"
 
 struct wcrypto_rsa_kg_in;
 struct wcrypto_rsa_kg_out;

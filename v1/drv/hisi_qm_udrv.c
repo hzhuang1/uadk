@@ -14,7 +14,7 @@
 #include <sys/eventfd.h>
 #include <sys/types.h>
 
-#include "hisi_qm_udrv.h"
+#include "hisi_qm_udrv_v1.h"
 #include "hisi_zip_udrv.h"
 #include "hisi_hpre_udrv.h"
 #include "hisi_sec_udrv.h"

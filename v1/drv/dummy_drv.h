@@ -2,9 +2,9 @@
 #ifndef __DUMMY_DRV_H__
 #define __DUMMY_DRV_H__
 
-#include "include/wd_dummy_usr_if.h"
-#include "include/dummy_hw_usr_if.h"
-#include "../wd.h"
+#include "v1/include/wd_dummy_usr_if.h"
+#include "v1/include/dummy_hw_usr_if.h"
+#include "v1/wd.h"
 
 #ifndef  DUMMY_ERR
 #define DUMMY_ERR(format, args...) printf(format, ##args)

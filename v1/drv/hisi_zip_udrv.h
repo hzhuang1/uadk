@@ -2,7 +2,7 @@
 #ifndef HISI_ZIP_USR_IF_H
 #define HISI_ZIP_USR_IF_H
 
-#include "hisi_qm_udrv.h"
+#include "hisi_qm_udrv_v1.h"
 
 enum hw_comp_alg_type {
 	HW_ZLIB  = 0x02,

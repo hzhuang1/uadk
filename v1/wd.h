@@ -15,6 +15,7 @@
 #include <limits.h>
 #include <assert.h>
 #include "include/uacce.h"
+#include "include/wd_common.h"
 
 #define SYS_VAL_SIZE		16
 #define PATH_STR_SIZE		256
@@ -86,11 +87,6 @@ enum wcrypto_type {
 	WD_EC,
 	WD_RNG,
 	WD_MAX_ALG,
-};
-
-enum wd_buff_type {
-	WD_FLAT_BUF,
-	WD_SGL_BUF,
 };
 
 #ifndef true

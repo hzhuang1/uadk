@@ -13,8 +13,8 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/types.h>
-#include "wd_util.h"
-#include "wd_comp.h"
+#include "v1/wd_util.h"
+#include "v1/wd_comp.h"
 #include "hisi_zip_udrv.h"
 
 #define MIN_AVAILOUT_SIZE 4096

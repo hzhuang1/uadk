@@ -17,7 +17,7 @@
 #include <sys/eventfd.h>
 #include <sys/queue.h>
 
-#include "wd.h"
+#include "v1/wd.h"
 
 #define BYTE_BITS			8
 #define BYTE_BITS_SHIFT		3
