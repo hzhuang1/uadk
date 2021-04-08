@@ -80,22 +80,39 @@ run_zip_test_v1()
 # failed: return 1; success: return 0
 run_zip_test_v2()
 {
+	echo "zip_concurrent"
+	for i in {1..10}
+	do
+		zip_concurrent
+	done
+	exit
+
 	run_cmd zip_sva_perf -b 8192 -l 1000 -v -m 0
 
 	run_cmd zip_sva_perf -b 8192 -l 1 -v -m 1
 
+	echo "bs=1M count=1 gzip"
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
 	zip_sva_perf -F < origin > hw.gz
 	zip_sva_perf -F -d < hw.gz > origin
 	md5sum -c ori.md5
 
+	echo "bs=1M count=1 -t128 zlib"
+	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
+	md5sum origin > ori.md5
+	zip_sva_perf -F -z -t 128 < origin > hw.zlib
+	zip_sva_perf -F -z -d -t 128 < hw.zlib > origin
+	md5sum -c ori.md5
+
+	echo "bs=1M count=1 -t64 zlib"
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
 	zip_sva_perf -F -z -t 64 < origin > hw.zlib
 	zip_sva_perf -F -z -d -t 64 < hw.zlib > origin
 	md5sum -c ori.md5
 
+	echo "bs=1M count=1 -m gzip"
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
 	zip_sva_perf -F -m 1 < origin > hw.gz
@@ -103,6 +120,7 @@ run_zip_test_v2()
 	md5sum -c ori.md5 || exit_code=$?
 
 
+	echo "bs=10M count=50 gzip"
 	dd if=/dev/urandom of=origin bs=10M count=50 &> /dev/null
 	md5sum origin > ori.md5
 	zip_sva_perf -S -F < origin > hw.gz
@@ -110,12 +128,14 @@ run_zip_test_v2()
 	md5sum -c ori.md5
 
 
+	echo "b1=1M count=1 gzip"
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
 	zip_sva_perf -F < origin > hw.gz
 	gunzip < hw.gz > origin
 	md5sum -c ori.md5
 
+	echo "bs=10M count=1 gzip"
 	dd if=/dev/urandom of=origin bs=10M count=1 &> /dev/null
 	md5sum origin > ori.md5
 	zip_sva_perf -S -F < origin > hw.gz
