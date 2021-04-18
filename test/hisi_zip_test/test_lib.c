@@ -579,6 +579,44 @@ out:
 	return (void *)(uintptr_t)(ret);
 }
 
+void *hw_ifl_perf(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_ifl;
+	int i, ret;
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_DECOMPRESS;
+
+	h_ifl = wd_comp_alloc_sess(&setup);
+	if (!h_ifl)
+		return (void *)(uintptr_t)(-EINVAL);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = hw_inflate(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
+				 opts);
+		if (ret)
+			goto out;
+	}
+	wd_comp_free_sess(h_ifl);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	return NULL;
+out:
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	wd_comp_free_sess(h_ifl);
+	return (void *)(uintptr_t)(ret);
+}
+
 static int hizip_check_rand(unsigned char *buf, unsigned int size, void *opaque)
 {
 	int i;
@@ -1226,6 +1264,86 @@ out_dst:
 	for (j = 0; j < i; j++)
 		free(tdatas[j].dst);
 out_src:
+	free(tdatas);
+out:
+	free(info->send_tds);
+	return ret;
+}
+
+int create_send3_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*send_thread_func)(void *arg)
+			)
+{
+	pthread_attr_t attr;
+	thread_data_t *tdatas;
+	int i, j, num, ret;
+	void *src, *tbuf;
+	size_t tbuf_sz;
+
+	num = opts->thread_num;
+	info->send_tds = calloc(1, sizeof(pthread_t) * num);
+	if (!info->send_tds)
+		return -ENOMEM;
+	info->send_tnum = num;
+	tdatas = calloc(1, sizeof(thread_data_t) * num);
+	if (!tdatas) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	tbuf_sz = opts->total_len;
+	tbuf = malloc(tbuf_sz);
+	if (!tbuf) {
+		ret = -ENOMEM;
+		goto out_buf;
+	}
+	gen_random_data(tbuf, tbuf_sz);
+	src = malloc(info->in_size);
+	if (!src) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	ret = sw_deflate(tbuf, src, tbuf_sz, opts);
+	if (ret)
+		goto out_dfl;
+	for (i = 0; i < num; i++) {
+		/* src address is shared among threads */
+		__atomic_add_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+		tdatas[i].src_sz = info->in_size;
+		tdatas[i].src = src;
+		tdatas[i].dst_sz = info->out_size;
+		tdatas[i].dst = malloc(tdatas[i].dst_sz);
+		if (!tdatas[i].dst) {
+			ret = -ENOMEM;
+			goto out_dst;
+		}
+		calculate_md5(&tdatas[i].md5, tdatas[i].src, tdatas[i].src_sz);
+	}
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	for (i = 0; i < num; i++) {
+		tdatas[i].info = info;
+		ret = pthread_create(&info->send_tds[i], &attr,
+				     send_thread_func, &tdatas[i]);
+		if (ret < 0) {
+			fprintf(stderr, "Fail to create send thread %d (%d)\n",
+				i, ret);
+			goto out_thd;
+		}
+	}
+	pthread_attr_destroy(&attr);
+	return 0;
+out_thd:
+	for (j = 0; j < i; j++)
+		pthread_cancel(info->send_tds[j]);
+out_dst:
+	for (j = 0; j < i; j++)
+		free(tdatas[j].dst);
+out_dfl:
+	free(src);
+out_src:
+	free(tbuf);
+out_buf:
 	free(tdatas);
 out:
 	free(info->send_tds);
