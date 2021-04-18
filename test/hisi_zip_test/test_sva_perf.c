@@ -749,6 +749,8 @@ static int test_sw_dfl_sw_ifl(void)
 	int ret;
 
 	info.opts = &opts;
+	info.in_size = opts.total_len;
+	info.out_size = opts.total_len;
 	ret = create_send2_threads(&opts, &info, sw_dfl_sw_ifl);
 	if (ret)
 		return ret;
@@ -785,6 +787,8 @@ static int test_sw_dfl_hw_ifl(void)
 	int ret;
 
 	info.opts = &opts;
+	info.in_size = opts.total_len;
+	info.out_size = opts.total_len;
 	info.list = get_dev_list(&opts, 1);
 	if (!info.list)
 		return -EINVAL;
@@ -833,6 +837,8 @@ static int test_hw_dfl_sw_ifl(void)
 	int ret;
 
 	info.opts = &opts;
+	info.in_size = opts.total_len;
+	info.out_size = opts.total_len;
 	info.list = get_dev_list(&opts, 1);
 	if (!info.list)
 		return -EINVAL;
@@ -881,6 +887,8 @@ static int test_hw_dfl_hw_ifl(void)
 	int ret;
 
 	info.opts = &opts;
+	info.in_size = opts.total_len;
+	info.out_size = opts.total_len;
 	info.list = get_dev_list(&opts, 1);
 	if (!info.list)
 		return -EINVAL;
@@ -911,6 +919,56 @@ out:
 	return ret;
 }
 
+static int test_hw_dfl_perf(void)
+{
+	struct hizip_test_info info = {0};
+	struct test_options opts = {
+		.alg_type		= WD_ZLIB,
+		.sync_mode		= 0,
+		.thread_num		= 16,
+		.q_num			= 16,
+		.block_size		= 8192,
+		.total_len		= 8192 * 10,
+		.compact_run_num	= 1000,
+	};
+	struct timeval start_tvl, end_tvl;
+	struct wd_sched *sched = NULL;
+	double ilen, usec, speed;
+	int ret;
+
+	info.opts = &opts;
+	info.in_size = opts.total_len;
+	info.out_size = opts.total_len * EXPANSION_RATIO;
+	info.list = get_dev_list(&opts, 1);
+	if (!info.list)
+		return -EINVAL;
+	ret = init_ctx_config(&opts, &info, &sched);
+	if (ret)
+		goto out;
+	ret = create_send2_threads(&opts, &info, hw_dfl_perf);
+	if (ret)
+		goto out_thd;
+	gettimeofday(&start_tvl, NULL);
+	ret = attach_threads(&opts, &info);
+	if (ret)
+		goto out_thd;
+	gettimeofday(&end_tvl, NULL);
+	timersub(&end_tvl, &start_tvl, &start_tvl);
+	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
+	ilen = opts.total_len * opts.thread_num * opts.compact_run_num;
+	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
+	printf("HW compress with %d threads at %.2fMB/s in %f usec.\n",
+	       opts.thread_num, speed, usec);
+	uninit_config(&info, sched);
+	free_threads(&info);
+	return 0;
+out_thd:
+	uninit_config(&info, sched);
+out:
+	wd_free_list_accels(info.list);
+	return ret;
+}
+
 static int run_self_test(void)
 {
 	int ret, f_ret = 0;
@@ -931,6 +989,10 @@ static int run_self_test(void)
 	ret = test_hw_dfl_hw_ifl();
 	if (ret)
 		printf("Fail on running test_hw_dfl_hw_ifl():%d\n", ret);
+	f_ret |= ret;
+	ret = test_hw_dfl_perf();
+	if (ret)
+		printf("Fail on running test_hw_dfl_perf():%d\n", ret);
 	f_ret |= ret;
 	if (!f_ret)
 		printf("Run self test successfully!\n");
