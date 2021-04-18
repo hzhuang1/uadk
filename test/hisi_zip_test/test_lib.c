@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <math.h>
 #include <sys/mman.h>
+#include <zlib.h>
 
 #include "hisi_qm_udrv.h"
 #include "sched_sample.h"
@@ -39,6 +40,239 @@ void *mmap_alloc(size_t len)
 		WD_ERR("Failed to allocate %zu bytes\n", len);
 
 	return p == MAP_FAILED ? NULL : p;
+}
+
+static void gen_random_data(void *buf, size_t len)
+{
+	int i;
+	uint32_t seed = 0;
+	unsigned short rand_state[3] = {(seed >> 16) & 0xffff, seed & 0xffff,
+					0x330e};
+
+	for (i = 0; i < len >> 3; i++)
+		*((uint64_t *)buf + i) = nrand48(rand_state);
+}
+
+static int calculate_md5(comp_md5_t *md5, const void *buf, size_t len)
+{
+	if (!md5 || !buf || !len)
+		return -EINVAL;
+	MD5_Init(&md5->md5_ctx);
+	MD5_Update(&md5->md5_ctx, buf, len);
+	MD5_Final(md5->md, &md5->md5_ctx);
+	return 0;
+}
+
+static void dump_md5(comp_md5_t *md5)
+{
+	int i;
+
+	for (i = 0; i < MD5_DIGEST_LENGTH - 1; i++)
+		printf("%02x-", md5->md[i]);
+	printf("%02x\n", md5->md[i]);
+}
+
+static int cmp_md5(comp_md5_t *orig, comp_md5_t *final)
+{
+	int i;
+
+	if (!orig || !final)
+		return -EINVAL;
+	for (i = 0; i < MD5_DIGEST_LENGTH; i++) {
+		if (orig->md[i] != final->md[i]) {
+			printf("Original MD5: ");
+			dump_md5(orig);
+			printf("Final MD5: ");
+			dump_md5(final);
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
+static int chunk_deflate(void *in, void *out, struct test_options *opts)
+{
+	size_t chunk_sz = opts->block_size;
+	int alg_type = opts->alg_type;
+	z_stream strm;
+	int windowBits;
+	int ret;
+
+	switch (alg_type) {
+	case WD_ZLIB:
+		windowBits = 15;
+		break;
+	case WD_DEFLATE:
+		windowBits = -15;
+		break;
+	case WD_GZIP:
+		windowBits = 15 + 16;
+		break;
+	default:
+		printf("algorithm %d unsupported by zlib\n", alg_type);
+		return -EINVAL;
+	}
+	memset(&strm, 0, sizeof(z_stream));
+	strm.next_in = in;
+	strm.avail_in = chunk_sz;
+	strm.next_out = out;
+	strm.avail_out = chunk_sz * EXPANSION_RATIO;
+
+	ret = deflateInit2(&strm, Z_BEST_SPEED, Z_DEFLATED, windowBits,
+			   8, Z_DEFAULT_STRATEGY);
+	if (ret != Z_OK) {
+		printf("deflateInit2: %d\n", ret);
+		return -EINVAL;
+	}
+
+	do {
+		ret = deflate(&strm, Z_FINISH);
+		if ((ret == Z_STREAM_ERROR) || (ret == Z_BUF_ERROR)) {
+			printf("defalte error %d - %s\n", ret, strm.msg);
+			ret = -ENOSR;
+			break;
+		} else if (!strm.avail_in) {
+			if (ret != Z_STREAM_END)
+				printf("deflate unexpected return: %d\n", ret);
+			ret = 0;
+			break;
+		} else if (!strm.avail_out) {
+			printf("deflate out of memory\n");
+			ret = -ENOSPC;
+			break;
+		}
+	} while (ret == Z_OK);
+
+	deflateEnd(&strm);
+	return ret;
+}
+
+/*
+ * This function is used in BLOCK mode. Each compressing in BLOCK mode
+ * produces compression header.
+ */
+static int chunk_inflate(void *in, void *out, struct test_options *opts)
+{
+	size_t chunk_sz = opts->block_size;
+	z_stream strm;
+	int ret;
+
+	memset(&strm, 0, sizeof(z_stream));
+	/* Window size of 15, +32 for auto-decoding gzip/zlib */
+	ret = inflateInit2(&strm, 15 + 32);
+	if (ret != Z_OK) {
+		printf("zlib inflateInit: %d\n", ret);
+		return -EINVAL;
+	}
+
+	strm.next_in = in;
+	strm.avail_in = chunk_sz * EXPANSION_RATIO;
+	strm.next_out = out;
+	strm.avail_out = chunk_sz;
+	do {
+		ret = inflate(&strm, Z_NO_FLUSH);
+		if ((ret < 0) || (ret == Z_NEED_DICT)) {
+			printf("zlib error %d - %s\n", ret, strm.msg);
+			goto out;
+		}
+		if (!strm.avail_out)
+			strm.avail_out = chunk_sz;
+	} while (strm.avail_in && (ret != Z_STREAM_END));
+	inflateEnd(&strm);
+	return 0;
+out:
+	inflateEnd(&strm);
+	ret = -EINVAL;
+	return ret;
+}
+
+int sw_deflate(void *in, void *out, size_t in_sz, struct test_options *opts)
+{
+	off_t off;
+	int ret = 0;
+
+	for (off = 0; off < in_sz; off += opts->block_size) {
+		ret = chunk_deflate(in, out, opts);
+		if (ret)
+			break;
+		in += opts->block_size;
+		out += opts->block_size * EXPANSION_RATIO;
+	}
+	return ret;
+}
+
+/*
+ * sw_inflate() repeats to call chunk_inflate() to inflate all blocks
+ * in IN buffer.
+ * in_size is EXPANSION_RATIO times of out_sz.
+ */
+int sw_inflate(void *in, void *out, size_t in_sz, struct test_options *opts)
+{
+	size_t sum = 0, out_sz;
+	int ret;
+
+	out_sz = in_sz / EXPANSION_RATIO;
+	do {
+		ret = chunk_inflate(in, out, opts);
+		if (ret)
+			return ret;
+		in += opts->block_size * EXPANSION_RATIO;
+		out += opts->block_size;
+		sum += opts->block_size;
+	} while (!ret && (sum < out_sz));
+	return 0;
+}
+
+void *sw_dfl_sw_ifl(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	void *tbuf;
+	size_t tbuf_sz;
+	comp_md5_t final_md5;
+	int i, ret;
+
+	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
+	tbuf = malloc(tbuf_sz);
+	if (!tbuf)
+		return (void *)(uintptr_t)(-ENOMEM);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
+		if (ret) {
+			printf("Fail to deflate by zlib: %d\n", ret);
+			goto out;
+		}
+		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
+		if (ret) {
+			printf("Fail to inflate by zlib: %d\n", ret);
+			goto out;
+		}
+		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
+		if (ret) {
+			printf("Fail to generate MD5 (%d)\n", ret);
+			goto out;
+		}
+		ret = cmp_md5(&tdata->md5, &final_md5);
+		if (ret) {
+			printf("MD5 is unmatched (%d)\n", ret);
+			goto out;
+		}
+	}
+	free(tbuf);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	return NULL;
+out:
+	free(tbuf);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	return (void *)(uintptr_t)(ret);
 }
 
 static int hizip_check_rand(unsigned char *buf, unsigned int size, void *opaque)
@@ -622,6 +856,73 @@ int create_send_threads(struct test_options *opts,
 out_thd:
 	for (j = 0; j < i; j++)
 		pthread_cancel(info->send_tds[j]);
+	free(tdatas);
+out:
+	free(info->send_tds);
+	return ret;
+}
+
+int create_send2_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*send_thread_func)(void *arg)
+			)
+{
+	pthread_attr_t attr;
+	thread_data_t *tdatas;
+	int i, j, num, ret;
+	void *src;
+
+	num = opts->thread_num;
+	info->send_tds = calloc(1, sizeof(pthread_t) * num);
+	if (!info->send_tds)
+		return -ENOMEM;
+	info->send_tnum = num;
+	tdatas = calloc(1, sizeof(thread_data_t) * num);
+	if (!tdatas) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	src = malloc(opts->total_len);
+	if (!src) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	for (i = 0; i < num; i++) {
+		/* src address is shared among threads */
+		__atomic_add_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+		tdatas[i].src_sz = opts->total_len;
+		tdatas[i].src = src;
+		tdatas[i].dst_sz = opts->total_len;
+		tdatas[i].dst = malloc(tdatas[i].dst_sz);
+		if (!tdatas[i].dst) {
+			ret = -ENOMEM;
+			goto out_dst;
+		}
+		gen_random_data(tdatas[i].src, tdatas[i].src_sz);
+		calculate_md5(&tdatas[i].md5, tdatas[i].src, tdatas[i].src_sz);
+	}
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	for (i = 0; i < num; i++) {
+		tdatas[i].info = info;
+		ret = pthread_create(&info->send_tds[i], &attr,
+				     send_thread_func, &tdatas[i]);
+		if (ret < 0) {
+			fprintf(stderr, "Fail to create send thread %d (%d)\n",
+				i, ret);
+			goto out_thd;
+		}
+	}
+	pthread_attr_destroy(&attr);
+	return 0;
+out_thd:
+	for (j = 0; j < i; j++)
+		pthread_cancel(info->send_tds[j]);
+out_dst:
+	for (j = 0; j < i; j++)
+		free(tdatas[j].dst);
+out_src:
+	free(tdatas);
 out:
 	free(info->send_tds);
 	return ret;
@@ -673,6 +974,14 @@ int attach_threads(struct test_options *opts, struct hizip_test_info *info)
 			fprintf(stderr, "Fail on send thread with %d\n", ret);
 	}
 	return (int)(uintptr_t)tret;
+}
+
+void free_threads(struct hizip_test_info *info)
+{
+	if (info->send_tds)
+		free(info->send_tds);
+	if (info->poll_tds)
+		free(info->poll_tds);
 }
 
 /*

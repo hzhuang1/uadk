@@ -3,6 +3,7 @@
 #define TEST_LIB_H_
 
 #include <errno.h>
+#include <openssl/md5.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -85,10 +86,28 @@ struct test_options {
 
 };
 
+typedef struct _comp_md5_t {
+	MD5_CTX		md5_ctx;
+	unsigned char	md[MD5_DIGEST_LENGTH];
+} comp_md5_t;
+
+typedef struct _thread_data_t {
+	struct hizip_test_info *info;
+	struct wd_comp_req req;
+	comp_md5_t md5;
+	void *src;
+	void *dst;
+	size_t src_sz;
+	size_t dst_sz;
+	size_t sum;	/* produced bytes for OUT */
+} thread_data_t;
+
 struct hizip_test_info {
 	struct test_options *opts;
 	char *in_buf, *out_buf;
 	size_t in_size, out_size;
+	/* reference count if the address is shared among threads */
+	int in_share, out_share;
 	size_t total_out;
 	struct uacce_dev_list *list;
 	handle_t h_sess;
@@ -111,23 +130,23 @@ struct hizip_test_info {
 	} tv;
 };
 
-typedef struct _thread_data_t {
-	struct hizip_test_info *info;
-	struct wd_comp_req req;
-	size_t sum;
-} thread_data_t;
-
 void *send_thread_func(void *arg);
 void *poll_thread_func(void *arg);
+void *sw_dfl_sw_ifl(void *arg);
 int create_send_threads(struct test_options *opts,
 			struct hizip_test_info *info,
 			void *(*send_thread_func)(void *arg)
+			);
+int create_send2_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*send_thread_func)(void *arg)
 			);
 int create_poll_threads(struct hizip_test_info *info,
 			void *(*poll_thread_func)(void *arg),
 			int num);
 int attach_threads(struct test_options *opts,
 		   struct hizip_test_info *info);
+void free_threads(struct hizip_test_info *info);
 int init_ctx_config(struct test_options *opts,
 		    void *priv,
 		    struct wd_sched **sched
