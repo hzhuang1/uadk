@@ -4,6 +4,7 @@
  */
 #include <asm/unistd.h>	/* For __NR_perf_event_open */
 #include <fenv.h>
+#include <getopt.h>
 #include <inttypes.h>
 #include <math.h>
 #include <signal.h>
@@ -732,6 +733,54 @@ static void handle_sigbus(int sig)
 	        _exit(0);
 }
 
+static int test_sw_dfl_sw_ifl(void)
+{
+	struct hizip_test_info info = {0};
+	struct test_options opts = {
+		.alg_type		= WD_ZLIB,
+		.sync_mode		= 0,
+		.thread_num		= 16,
+		.block_size		= 8192,
+		.total_len		= 8192 * 10,
+		.compact_run_num	= 1000,
+	};
+	struct timeval start_tvl, end_tvl;
+	double ilen, usec, speed;
+	int ret;
+
+	info.opts = &opts;
+	ret = create_send2_threads(&opts, &info, sw_dfl_sw_ifl);
+	if (ret)
+		return ret;
+	gettimeofday(&start_tvl, NULL);
+	ret = attach_threads(&opts, &info);
+	if (ret)
+		return ret;
+	gettimeofday(&end_tvl, NULL);
+	timersub(&end_tvl, &start_tvl, &start_tvl);
+	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
+	ilen = opts.total_len * opts.thread_num * opts.compact_run_num;
+	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
+	printf("Mixture of SW compress and SW decompress with %d threads "
+	       "at %.2fMB/s in %f usec.\n", opts.thread_num, speed, usec);
+	free_threads(&info);
+	return 0;
+}
+
+static int run_self_test(void)
+{
+	int ret, f_ret = 0;
+
+	printf("Start to run self test!\n");
+	ret = test_sw_dfl_sw_ifl();
+	if (ret)
+		printf("Fail on running test_sw_dfl_sw_ifl():%d\n", ret);
+	f_ret |= ret;
+	if (!f_ret)
+		printf("Run self test successfully!\n");
+	return f_ret;
+}
+
 int main(int argc, char **argv)
 {
 	struct test_options opts = {
@@ -754,11 +803,18 @@ int main(int argc, char **argv)
 		.faults			= 0,
 		.data_fmt		= 0,
 	};
+	struct option long_options[] = {
+		{"self",	no_argument,	0, 0 },
+		{0,		0,		0, 0 },
+	};
 	int show_help = 0;
-	int opt;
+	int opt, option_idx;
 
-	while ((opt = getopt(argc, argv, COMMON_OPTSTRING "f:o:w:k:r:")) != -1) {
+	while ((opt = getopt_long(argc, argv, COMMON_OPTSTRING "f:o:w:k:r:",
+				  long_options, &option_idx)) != -1) {
 		switch (opt) {
+		case 0:
+			return run_self_test();
 		case 'f':
 			if (strcmp(optarg, "none") == 0) {
 				opts.display_stats = STATS_NONE;
