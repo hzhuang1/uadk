@@ -275,6 +275,104 @@ out:
 	return (void *)(uintptr_t)(ret);
 }
 
+int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
+	       struct test_options *opts)
+{
+	struct wd_comp_req req = {0};
+	size_t sum = 0, out_sz, chunk_sz;
+	int ret;
+
+	out_sz = in_sz / EXPANSION_RATIO;
+	chunk_sz = opts->block_size;
+	req.src = in;
+	req.src_len = chunk_sz * EXPANSION_RATIO;
+	req.dst = out;
+	req.dst_len = chunk_sz;
+	req.op_type = WD_DIR_DECOMPRESS;
+	req.cb = NULL;
+
+	do {
+		ret = wd_do_comp_sync(h_ifl, &req);
+		if (ret)
+			return ret;
+		req.src += chunk_sz * EXPANSION_RATIO;
+		req.src_len = chunk_sz * EXPANSION_RATIO;
+		req.dst += chunk_sz;
+		req.dst_len = chunk_sz;
+		sum += chunk_sz;
+	} while (!ret && (sum < out_sz));
+	return 0;
+}
+
+void *sw_dfl_hw_ifl(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_ifl;
+	void *tbuf;
+	size_t tbuf_sz;
+	comp_md5_t final_md5;
+	int i, ret;
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_DECOMPRESS;
+
+	h_ifl = wd_comp_alloc_sess(&setup);
+	if (!h_ifl) {
+		printf("Fail to allocate session for decompress!\n");
+		return (void *)(uintptr_t)(-EINVAL);
+	}
+
+	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
+	tbuf = malloc(tbuf_sz);
+	if (!tbuf) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
+		if (ret) {
+			printf("Fail to deflate by zlib: %d\n", ret);
+			goto out_run;
+		}
+		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz, opts);
+		if (ret) {
+			printf("Fail to inflate by zlib: %d\n", ret);
+			goto out_run;
+		}
+		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
+		if (ret) {
+			printf("Fail to generate MD5 (%d)\n", ret);
+			goto out_run;
+		}
+		ret = cmp_md5(&tdata->md5, &final_md5);
+		if (ret) {
+			printf("MD5 is unmatched (%d)\n", ret);
+			goto out_run;
+		}
+	}
+	wd_comp_free_sess(h_ifl);
+	free(tbuf);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	return NULL;
+out_run:
+	wd_comp_free_sess(h_ifl);
+	free(tbuf);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+out:
+	return (void *)(uintptr_t)(ret);
+}
+
 static int hizip_check_rand(unsigned char *buf, unsigned int size, void *opaque)
 {
 	int i;
