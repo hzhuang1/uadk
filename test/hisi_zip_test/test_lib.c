@@ -275,6 +275,32 @@ out:
 	return (void *)(uintptr_t)(ret);
 }
 
+int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
+	       struct test_options *opts)
+{
+	struct wd_comp_req req = {0};
+	off_t off;
+	int ret = 0;
+
+	req.src = in;
+	req.src_len = opts->block_size;
+	req.dst = out;
+	req.dst_len = opts->block_size * EXPANSION_RATIO;
+	req.op_type = WD_DIR_COMPRESS;
+	req.cb = NULL;
+
+	for (off = 0; off < in_sz; off += opts->block_size) {
+		ret = wd_do_comp_sync(h_dfl, &req);
+		if (ret)
+			return ret;
+		req.src += opts->block_size;
+		req.src_len = opts->block_size;
+		req.dst += opts->block_size * EXPANSION_RATIO;
+		req.dst_len = opts->block_size * EXPANSION_RATIO;
+	}
+	return 0;
+}
+
 int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	       struct test_options *opts)
 {
@@ -364,6 +390,75 @@ void *sw_dfl_hw_ifl(void *arg)
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_ifl);
+	free(tbuf);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+out:
+	return (void *)(uintptr_t)(ret);
+}
+
+void *hw_dfl_sw_ifl(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_dfl;
+	void *tbuf;
+	size_t tbuf_sz;
+	comp_md5_t final_md5;
+	int i, ret;
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_COMPRESS;
+
+	h_dfl = wd_comp_alloc_sess(&setup);
+	if (!h_dfl) {
+		printf("Fail to allocate session for decompress!\n");
+		return (void *)(uintptr_t)(-EINVAL);
+	}
+
+	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
+	tbuf = malloc(tbuf_sz);
+	if (!tbuf) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz, opts);
+		if (ret) {
+			printf("Fail to deflate by zlib: %d\n", ret);
+			goto out_run;
+		}
+		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
+		if (ret) {
+			printf("Fail to inflate by zlib: %d\n", ret);
+			goto out_run;
+		}
+		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
+		if (ret) {
+			printf("Fail to generate MD5 (%d)\n", ret);
+			goto out_run;
+		}
+		ret = cmp_md5(&tdata->md5, &final_md5);
+		if (ret) {
+			printf("MD5 is unmatched (%d)\n", ret);
+			goto out_run;
+		}
+	}
+	wd_comp_free_sess(h_dfl);
+	free(tbuf);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	return NULL;
+out_run:
+	wd_comp_free_sess(h_dfl);
 	free(tbuf);
 	free(tdata->dst);
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
