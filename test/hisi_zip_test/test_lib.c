@@ -541,6 +541,44 @@ out:
 	return (void *)(uintptr_t)(ret);
 }
 
+void *hw_dfl_perf(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_dfl;
+	int i, ret;
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_COMPRESS;
+
+	h_dfl = wd_comp_alloc_sess(&setup);
+	if (!h_dfl)
+		return (void *)(uintptr_t)(-EINVAL);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = hw_deflate(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
+				 opts);
+		if (ret)
+			goto out;
+	}
+	wd_comp_free_sess(h_dfl);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	return NULL;
+out:
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	wd_comp_free_sess(h_dfl);
+	return (void *)(uintptr_t)(ret);
+}
+
 static int hizip_check_rand(unsigned char *buf, unsigned int size, void *opaque)
 {
 	int i;
@@ -1156,9 +1194,9 @@ int create_send2_threads(struct test_options *opts,
 	for (i = 0; i < num; i++) {
 		/* src address is shared among threads */
 		__atomic_add_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-		tdatas[i].src_sz = opts->total_len;
+		tdatas[i].src_sz = info->in_size;
 		tdatas[i].src = src;
-		tdatas[i].dst_sz = opts->total_len;
+		tdatas[i].dst_sz = info->out_size;
 		tdatas[i].dst = malloc(tdatas[i].dst_sz);
 		if (!tdatas[i].dst) {
 			ret = -ENOMEM;
