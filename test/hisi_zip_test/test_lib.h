@@ -133,6 +133,7 @@ struct hizip_test_info {
 void *send_thread_func(void *arg);
 void *poll_thread_func(void *arg);
 void *sw_dfl_sw_ifl(void *arg);
+void *sw_dfl_hw_ifl(void *arg);
 int create_send_threads(struct test_options *opts,
 			struct hizip_test_info *info,
 			void *(*send_thread_func)(void *arg)
