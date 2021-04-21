@@ -90,6 +90,11 @@ static int cmp_md5(comp_md5_t *orig, comp_md5_t *final)
 	return 0;
 }
 
+static void *async_cb(struct wd_comp_req *req, void *data)
+{
+	return NULL;
+}
+
 static int chunk_deflate(void *in, void *out, struct test_options *opts)
 {
 	size_t chunk_sz = opts->block_size;
@@ -287,7 +292,10 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	req.dst = out;
 	req.dst_len = opts->block_size * EXPANSION_RATIO;
 	req.op_type = WD_DIR_COMPRESS;
-	req.cb = NULL;
+	if (opts->sync_mode) {
+		req.cb = async_cb;
+		req.cb_param = &req;
+	}
 
 	for (off = 0; off < in_sz; off += opts->block_size) {
 		ret = wd_do_comp_sync(h_dfl, &req);
@@ -315,10 +323,16 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	req.dst = out;
 	req.dst_len = chunk_sz;
 	req.op_type = WD_DIR_DECOMPRESS;
-	req.cb = NULL;
+	if (opts->sync_mode) {
+		req.cb = async_cb;
+		req.cb_param = &req;
+	}
 
 	do {
-		ret = wd_do_comp_sync(h_ifl, &req);
+		if (opts->sync_mode)
+			ret = wd_do_comp_async(h_ifl, &req);
+		else
+			ret = wd_do_comp_sync(h_ifl, &req);
 		if (ret)
 			return ret;
 		req.src += chunk_sz * EXPANSION_RATIO;
@@ -1021,11 +1035,6 @@ int hizip_verify_random_output(struct test_options *opts,
 	return 0;
 }
 
-static void *async_cb(struct wd_comp_req *req, void *data)
-{
-	return NULL;
-}
-
 void *send_thread_func(void *arg)
 {
 	thread_data_t *tdata = (thread_data_t *)arg;
@@ -1375,6 +1384,42 @@ int create_poll_threads(struct hizip_test_info *info,
 	pthread_attr_destroy(&attr);
 	count = 0;
 	return 0;
+}
+
+int create_poll2_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*poll_thread_func)(void *arg)
+			)
+{
+	pthread_attr_t attr;
+	thread_data_t *tdatas;
+	int ret;
+
+	info->poll_tds = calloc(1, sizeof(pthread_t));
+	if (!info->poll_tds)
+		return -ENOMEM;
+	info->poll_tnum = 1;
+	tdatas = calloc(1, sizeof(thread_data_t));
+	if (!tdatas) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	tdatas->info = info;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	ret = pthread_create(&info->poll_tds[0], &attr,
+			     poll_thread_func, tdatas);
+	if (ret < 0) {
+		printf("Fail to create poll thread (%d)\n", ret);
+		goto out_thd;
+	}
+	pthread_attr_destroy(&attr);
+	return 0;
+out_thd:
+	free(tdatas);
+out:
+	free(info->poll_tds);
+	return ret;
 }
 
 int attach_threads(struct test_options *opts, struct hizip_test_info *info)

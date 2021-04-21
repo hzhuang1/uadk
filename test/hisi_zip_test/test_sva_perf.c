@@ -733,6 +733,7 @@ static void handle_sigbus(int sig)
 	        _exit(0);
 }
 
+/* Only support SYNC mode */
 static int test_sw_dfl_sw_ifl(void)
 {
 	struct hizip_test_info info = {0};
@@ -774,7 +775,7 @@ static int test_sw_dfl_hw_ifl(void)
 	struct hizip_test_info info = {0};
 	struct test_options opts = {
 		.alg_type		= WD_ZLIB,
-		.sync_mode		= 0,
+		.sync_mode		= 1,
 		.thread_num		= 16,
 		.q_num			= 16,
 		.block_size		= 8192,
@@ -797,11 +798,14 @@ static int test_sw_dfl_hw_ifl(void)
 		goto out;
 	ret = create_send2_threads(&opts, &info, sw_dfl_hw_ifl);
 	if (ret)
-		goto out_thd;
+		goto out_send;
+	ret = create_poll2_threads(&opts, &info, poll_thread_func);
+	if (ret)
+		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
 	ret = attach_threads(&opts, &info);
 	if (ret)
-		goto out_thd;
+		goto out_poll;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
@@ -812,7 +816,9 @@ static int test_sw_dfl_hw_ifl(void)
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
-out_thd:
+out_poll:
+	free_threads(&info);
+out_send:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
