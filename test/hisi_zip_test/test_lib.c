@@ -21,6 +21,7 @@ struct check_rand_ctx {
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static int count = 0;
+static int sum_send = 0;
 
 static struct wd_ctx_config *g_conf;
 
@@ -301,10 +302,11 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	for (off = 0; off < in_sz; off += opts->block_size) {
 		if (opts->sync_mode) {
 			ret = wd_do_comp_async(h_dfl, &req);
-			pthread_mutex_lock(&mutex);
+			//pthread_mutex_lock(&mutex);
 			//printf("#%s, %d, count:%d\n", __func__, __LINE__, count);
-			count++;
-			pthread_mutex_unlock(&mutex);
+			//count++;
+			//pthread_mutex_unlock(&mutex);
+			__atomic_add_fetch(&sum_send, 1, __ATOMIC_ACQ_REL);
 		} else
 			ret = wd_do_comp_sync(h_dfl, &req);
 		if (ret)
@@ -339,9 +341,10 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	do {
 		if (opts->sync_mode) {
 			ret = wd_do_comp_async(h_ifl, &req);
-			pthread_mutex_lock(&mutex);
-			count++;
-			pthread_mutex_unlock(&mutex);
+			//pthread_mutex_lock(&mutex);
+			//count++;
+			//pthread_mutex_unlock(&mutex);
+			__atomic_add_fetch(&sum_send, 1, __ATOMIC_ACQ_REL);
 		} else
 			ret = wd_do_comp_sync(h_ifl, &req);
 		if (ret) {
@@ -369,6 +372,7 @@ void *sw_dfl_hw_ifl(void *arg)
 	size_t tbuf_sz;
 	comp_md5_t final_md5;
 	int i, ret;
+	struct timeval start_tvl, end_tvl;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -385,6 +389,7 @@ void *sw_dfl_hw_ifl(void *arg)
 		goto out;
 	}
 
+	gettimeofday(&start_tvl, NULL);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
 		if (ret) {
@@ -414,8 +419,13 @@ void *sw_dfl_hw_ifl(void *arg)
 			//goto out_run;
 		}
 	}
+	gettimeofday(&end_tvl, NULL);
 	//printf("#%s, %d, count:%d\n", __func__, __LINE__, count);
 	wd_comp_free_sess(h_ifl);
+	timersub(&end_tvl, &start_tvl, &start_tvl);
+	printf("In %s, thread %d uses %f usec to send data.\n",
+		__func__, tdata->tid,
+		(double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec));
 	free(tbuf);
 	free(tdata->dst);
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
@@ -655,20 +665,36 @@ out:
 	return (void *)(uintptr_t)(ret);
 }
 
-static void *poll2_thread_func(void *arg)
+void *poll2_thread_func(void *arg)
 {
 	__u32 expected = 0, received;
 	int ret = 0, total_recv = 0;
+	struct timeval start_tvl, end_tvl;
+	int sum;
+	//int flip = 0;
 
+	gettimeofday(&start_tvl, NULL);
 	while (1) {
+#if 0
+		if (count && !flip) {
+			gettimeofday(&start_tvl, NULL);
+			flip = 1;
+		}
+#endif
+#if 0
 		pthread_mutex_lock(&mutex);
 		if (!expected)
 			expected = 1;
 		if (count == 0) {
 			pthread_mutex_unlock(&mutex);
-			usleep(10);
+			//usleep(10);
 			continue;
 		}
+#else
+		sum = __atomic_load_n(&sum_send, __ATOMIC_ACQUIRE);
+		if (sum == 0)
+			continue;
+#endif
 		//expected = 1;
 		received = 0;
 		ret = wd_comp_poll(expected, &received);
@@ -678,6 +704,7 @@ static void *poll2_thread_func(void *arg)
 		} else {
 			printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 		}
+#if 0
 		if (count == total_recv) {
 			pthread_mutex_unlock(&mutex);
 			break;
@@ -685,9 +712,21 @@ static void *poll2_thread_func(void *arg)
 			if (count > total_recv)
 				expected = count - total_recv;
 			pthread_mutex_unlock(&mutex);
-			usleep(10);
+			//usleep(10);
 		}
+#else
+		if (sum == total_recv)
+			break;
+		else {
+			if (sum > total_recv)
+				expected = sum - total_recv;
+		}
+#endif
 	}
+	gettimeofday(&end_tvl, NULL);
+	timersub(&end_tvl, &start_tvl, &start_tvl);
+	printf("Poll thread costs %f usec.\n",
+		(double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec));
 	//printf("#%s, %d, count:%d, total_recv:%d\n", __func__, __LINE__, count, total_recv);
 	pthread_exit(NULL);
 }
@@ -1452,37 +1491,41 @@ int create_poll_threads(struct hizip_test_info *info,
 
 int create_poll2_threads(struct test_options *opts,
 			 struct hizip_test_info *info,
-			 void *(*poll_thread_func)(void *arg)
+			 void *(*poll_func)(void *arg),
+			 int poll_num
 			)
 {
 	pthread_attr_t attr;
 	thread_data_t *tdatas;
-	int ret;
+	int i, j, ret;
 
-	info->poll_tds = calloc(1, sizeof(pthread_t));
+	if (poll_num <= 0)
+		return -EINVAL;
+	info->poll_tnum = poll_num;
+	info->poll_tds = calloc(1, sizeof(pthread_t) * poll_num);
 	if (!info->poll_tds)
 		return -ENOMEM;
-	info->poll_tnum = 1;
-	tdatas = calloc(1, sizeof(thread_data_t));
+	tdatas = calloc(1, sizeof(thread_data_t) * poll_num);
 	if (!tdatas) {
 		ret = -ENOMEM;
 		goto out;
 	}
 	tdatas->info = info;
-	pthread_mutex_lock(&mutex);
-	count = 0;
-	pthread_mutex_unlock(&mutex);
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	ret = pthread_create(&info->poll_tds[0], &attr,
-			     poll2_thread_func, tdatas);
-	if (ret < 0) {
-		printf("Fail to create poll thread (%d)\n", ret);
-		goto out_thd;
+	for (i = 0; i < poll_num; i++) {
+		ret = pthread_create(&info->poll_tds[i], &attr,
+				     poll_func, &tdatas[i]);
+		if (ret < 0) {
+			printf("Fail to create poll thread (%d)\n", ret);
+			goto out_thd;
+		}
 	}
 	pthread_attr_destroy(&attr);
 	return 0;
 out_thd:
+	for (j = 0; j < i; j++)
+		pthread_cancel(info->poll_tds[j]);
 	free(tdatas);
 out:
 	free(info->poll_tds);
@@ -1581,6 +1624,7 @@ int init_ctx_config(struct test_options *opts, void *priv,
 	int q_num = opts->q_num;
 
 
+	__atomic_store_n(&sum_send, 0, __ATOMIC_RELEASE);
 	*sched = sample_sched_alloc(SCHED_POLICY_RR, 2, 2, lib_poll_func);
 	if (!*sched) {
 		WD_ERR("sample_sched_alloc fail\n");

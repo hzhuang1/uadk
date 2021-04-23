@@ -799,7 +799,7 @@ static int test_sw_dfl_hw_ifl(void)
 	ret = create_send2_threads(&opts, &info, sw_dfl_hw_ifl);
 	if (ret)
 		goto out_send;
-	ret = create_poll2_threads(&opts, &info, poll_thread_func);
+	ret = create_poll2_threads(&opts, &info, poll2_thread_func, 1);
 	if (ret)
 		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
@@ -854,7 +854,7 @@ static int test_hw_dfl_sw_ifl(void)
 	ret = create_send2_threads(&opts, &info, hw_dfl_sw_ifl);
 	if (ret)
 		goto out_send;
-	ret = create_poll2_threads(&opts, &info, poll_thread_func);
+	ret = create_poll2_threads(&opts, &info, poll2_thread_func, 1);
 	if (ret)
 		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
@@ -958,11 +958,14 @@ static int test_hw_dfl_perf(void)
 		goto out;
 	ret = create_send2_threads(&opts, &info, hw_dfl_perf);
 	if (ret)
-		goto out_thd;
+		goto out_send;
+	ret = create_poll2_threads(&opts, &info, poll2_thread_func, 1);
+	if (ret)
+		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
 	ret = attach_threads(&opts, &info);
 	if (ret)
-		goto out_thd;
+		goto out_poll;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
@@ -973,7 +976,9 @@ static int test_hw_dfl_perf(void)
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
-out_thd:
+out_poll:
+	free_threads(&info);
+out_send:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
