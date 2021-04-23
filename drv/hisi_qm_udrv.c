@@ -323,8 +323,12 @@ err_out:
 
 static int get_free_num(struct hisi_qm_queue_info *q_info)
 {
+#if 1
 	/* The device should reserve one buffer. */
 	return (QM_Q_DEPTH - 1) - q_info->used_num;
+#else
+	return (QM_Q_DEPTH - 1) - __atomic_load_n(&q_info->used_num, __ATOMIC_ACQUIRE);
+#endif
 }
 
 int hisi_qm_get_free_sqe_num(handle_t h_qp)
@@ -420,8 +424,10 @@ int hisi_qm_send(handle_t h_qp, void *req, __u16 expect, __u16 *count)
 	}
 
 	free_num = get_free_num(q_info);
+	//printf("#%s, %d, free_num:%d\n", __func__, __LINE__, free_num);
 	if (!free_num) {
 		pthread_spin_unlock(&q_info->lock);
+		usleep(200);
 		return -WD_EBUSY;
 	}
 
@@ -432,7 +438,16 @@ int hisi_qm_send(handle_t h_qp, void *req, __u16 expect, __u16 *count)
 	tail = (tail + send_num) % QM_Q_DEPTH;
 	q_info->db(q_info, DOORBELL_CMD_SQ, tail, 0);
 	q_info->sq_tail_index = tail;
+#if 1
 	q_info->used_num += send_num;
+	//printf("#%s, %d, free_num:%d, send_num:%d, used_num:%d\n", __func__, __LINE__, free_num, send_num, q_info->used_num);
+#else
+	{
+		int ret;
+	ret = __atomic_add_fetch(&q_info->used_num, send_num, __ATOMIC_ACQ_REL);
+	//printf("#%s, %d, free_num:%d, send_num:%d, used_num:%d\n", __func__, __LINE__, free_num, send_num, ret);
+	}
+#endif
 	*count = send_num;
 
 	pthread_spin_unlock(&q_info->lock);
@@ -476,7 +491,16 @@ static int hisi_qm_recv_single(struct hisi_qm_queue_info *q_info, void *resp)
 	q_info->cq_head_index = i;
 	q_info->sq_head_index = i;
 
+#if 1
 	q_info->used_num--;
+	//printf("#%s, %d, used_num:%d\n", __func__, __LINE__, q_info->used_num);
+#else
+	{
+		int ret;
+	ret = __atomic_sub_fetch(&q_info->used_num, 1, __ATOMIC_ACQ_REL);
+	//printf("#%s, %d, used_num:%d\n", __func__, __LINE__, ret);
+	}
+#endif
 	pthread_spin_unlock(&q_info->lock);
 
 	return 0;

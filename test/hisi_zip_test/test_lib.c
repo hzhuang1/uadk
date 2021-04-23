@@ -261,7 +261,8 @@ void *sw_dfl_sw_ifl(void *arg)
 		}
 		ret = cmp_md5(&tdata->md5, &final_md5);
 		if (ret) {
-			printf("MD5 is unmatched (%d)\n", ret);
+			printf("MD5 is unmatched (%d) at %dth times on "
+				"thread %d\n", ret, i, tdata->tid);
 			goto out;
 		}
 	}
@@ -298,7 +299,14 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	}
 
 	for (off = 0; off < in_sz; off += opts->block_size) {
-		ret = wd_do_comp_sync(h_dfl, &req);
+		if (opts->sync_mode) {
+			ret = wd_do_comp_async(h_dfl, &req);
+			pthread_mutex_lock(&mutex);
+			//printf("#%s, %d, count:%d\n", __func__, __LINE__, count);
+			count++;
+			pthread_mutex_unlock(&mutex);
+		} else
+			ret = wd_do_comp_sync(h_dfl, &req);
 		if (ret)
 			return ret;
 		req.src += opts->block_size;
@@ -329,12 +337,18 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	}
 
 	do {
-		if (opts->sync_mode)
+		if (opts->sync_mode) {
 			ret = wd_do_comp_async(h_ifl, &req);
-		else
+			pthread_mutex_lock(&mutex);
+			count++;
+			pthread_mutex_unlock(&mutex);
+		} else
 			ret = wd_do_comp_sync(h_ifl, &req);
-		if (ret)
+		if (ret) {
+			if (ret == -WD_EBUSY)
+				continue;
 			return ret;
+		}
 		req.src += chunk_sz * EXPANSION_RATIO;
 		req.src_len = chunk_sz * EXPANSION_RATIO;
 		req.dst += chunk_sz;
@@ -377,22 +391,30 @@ void *sw_dfl_hw_ifl(void *arg)
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out_run;
 		}
+		//__builtin___clear_cache(tbuf, tbuf + tbuf_sz);
+		memset(tdata->dst, 0, tdata->dst_sz);
+		__builtin___clear_cache(tdata->dst, tdata->dst + tdata->dst_sz);
 		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz, opts);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
 			goto out_run;
 		}
+		__builtin___clear_cache(tdata->dst, tdata->dst + tdata->dst_sz);
+		//__builtin___clear_cache(tbuf, tbuf + tbuf_sz);
 		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
 		if (ret) {
 			printf("Fail to generate MD5 (%d)\n", ret);
 			goto out_run;
 		}
+		//dump_md5(&final_md5);
 		ret = cmp_md5(&tdata->md5, &final_md5);
 		if (ret) {
-			printf("MD5 is unmatched (%d)\n", ret);
-			goto out_run;
+			printf("MD5 is unmatched (%d) at %dth times on "
+				"thread %d\n", ret, i, tdata->tid);
+			//goto out_run;
 		}
 	}
+	//printf("#%s, %d, count:%d\n", __func__, __LINE__, count);
 	wd_comp_free_sess(h_ifl);
 	free(tbuf);
 	free(tdata->dst);
@@ -456,7 +478,8 @@ void *hw_dfl_sw_ifl(void *arg)
 		}
 		ret = cmp_md5(&tdata->md5, &final_md5);
 		if (ret) {
-			printf("MD5 is unmatched (%d)\n", ret);
+			printf("MD5 is unmatched (%d) at %dth times on "
+				"thread %d\n", ret, i, tdata->tid);
 			goto out_run;
 		}
 	}
@@ -530,7 +553,8 @@ void *hw_dfl_hw_ifl(void *arg)
 		}
 		ret = cmp_md5(&tdata->md5, &final_md5);
 		if (ret) {
-			printf("MD5 is unmatched (%d)\n", ret);
+			printf("MD5 is unmatched (%d) at %dth times on "
+				"thread %d\n", ret, i, tdata->tid);
 			goto out_run;
 		}
 	}
@@ -629,6 +653,43 @@ out:
 		free(tdata->src);
 	wd_comp_free_sess(h_ifl);
 	return (void *)(uintptr_t)(ret);
+}
+
+static void *poll2_thread_func(void *arg)
+{
+	__u32 expected = 0, received;
+	int ret = 0, total_recv = 0;
+
+	while (1) {
+		pthread_mutex_lock(&mutex);
+		if (!expected)
+			expected = 1;
+		if (count == 0) {
+			pthread_mutex_unlock(&mutex);
+			usleep(10);
+			continue;
+		}
+		//expected = 1;
+		received = 0;
+		ret = wd_comp_poll(expected, &received);
+		if (ret == 0) {
+			total_recv += received;
+			//printf("#%s, %d, expected:%d, received:%d\n", __func__, __LINE__, expected, received);
+		} else {
+			printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
+		}
+		if (count == total_recv) {
+			pthread_mutex_unlock(&mutex);
+			break;
+		} else {
+			if (count > total_recv)
+				expected = count - total_recv;
+			pthread_mutex_unlock(&mutex);
+			usleep(10);
+		}
+	}
+	//printf("#%s, %d, count:%d, total_recv:%d\n", __func__, __LINE__, count, total_recv);
+	pthread_exit(NULL);
 }
 
 static int hizip_check_rand(unsigned char *buf, unsigned int size, void *opaque)
@@ -1233,14 +1294,17 @@ int create_send2_threads(struct test_options *opts,
 		ret = -ENOMEM;
 		goto out;
 	}
-	src = malloc(opts->total_len);
+	info->in_size = opts->total_len;
+	src = malloc(info->in_size);
 	if (!src) {
 		ret = -ENOMEM;
 		goto out_src;
 	}
+	gen_random_data(src, info->in_size);
 	for (i = 0; i < num; i++) {
 		/* src address is shared among threads */
 		__atomic_add_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+		tdatas[i].tid = i;
 		tdatas[i].src_sz = info->in_size;
 		tdatas[i].src = src;
 		tdatas[i].dst_sz = info->out_size;
@@ -1249,7 +1313,6 @@ int create_send2_threads(struct test_options *opts,
 			ret = -ENOMEM;
 			goto out_dst;
 		}
-		gen_random_data(tdatas[i].src, tdatas[i].src_sz);
 		calculate_md5(&tdatas[i].md5, tdatas[i].src, tdatas[i].src_sz);
 	}
 	pthread_attr_init(&attr);
@@ -1318,6 +1381,7 @@ int create_send3_threads(struct test_options *opts,
 	for (i = 0; i < num; i++) {
 		/* src address is shared among threads */
 		__atomic_add_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+		tdatas[i].tid = i;
 		tdatas[i].src_sz = info->in_size;
 		tdatas[i].src = src;
 		tdatas[i].dst_sz = info->out_size;
@@ -1405,10 +1469,13 @@ int create_poll2_threads(struct test_options *opts,
 		goto out;
 	}
 	tdatas->info = info;
+	pthread_mutex_lock(&mutex);
+	count = 0;
+	pthread_mutex_unlock(&mutex);
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	ret = pthread_create(&info->poll_tds[0], &attr,
-			     poll_thread_func, tdatas);
+			     poll2_thread_func, tdatas);
 	if (ret < 0) {
 		printf("Fail to create poll thread (%d)\n", ret);
 		goto out_thd;

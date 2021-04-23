@@ -95,6 +95,7 @@ typedef struct _thread_data_t {
 	struct hizip_test_info *info;
 	struct wd_comp_req req;
 	comp_md5_t md5;
+	int tid;	/* thread ID */
 	void *src;
 	void *dst;
 	size_t src_sz;

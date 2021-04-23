@@ -80,6 +80,8 @@ run_zip_test_v1()
 # failed: return 1; success: return 0
 run_zip_test_v2()
 {
+	zip_sva_perf --self
+	exit
 	run_cmd zip_sva_perf -b 8192 -l 1000 -v -m 0
 
 	run_cmd zip_sva_perf -b 8192 -l 1 -v -m 1
