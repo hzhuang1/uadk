@@ -427,7 +427,6 @@ int hisi_qm_send(handle_t h_qp, void *req, __u16 expect, __u16 *count)
 	//printf("#%s, %d, free_num:%d\n", __func__, __LINE__, free_num);
 	if (!free_num) {
 		pthread_spin_unlock(&q_info->lock);
-		usleep(200);
 		return -WD_EBUSY;
 	}
 

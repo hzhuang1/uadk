@@ -790,7 +790,7 @@ static int test_sw_dfl_hw_ifl(struct test_options *opts)
 	ret = create_send2_threads(opts, &info, sw_dfl_hw_ifl);
 	if (ret)
 		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func, 1);
+	ret = create_poll2_threads(opts, &info, poll2_thread_func, 8);
 	if (ret)
 		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
@@ -1062,8 +1062,6 @@ static int run_self_test(void)
 
 	/* ASYNC mode */
 	opts.sync_mode = 1;
-	opts.thread_num = 8;
-	opts.compact_run_num = 100;
 	ret = test_sw_dfl_hw_ifl(&opts);
 	if (ret)
 		printf("Fail on running test_sw_dfl_hw_ifl():%d\n", ret);
