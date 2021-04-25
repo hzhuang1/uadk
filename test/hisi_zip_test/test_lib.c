@@ -400,22 +400,17 @@ void *sw_dfl_hw_ifl(void *arg)
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out_run;
 		}
-		//__builtin___clear_cache(tbuf, tbuf + tbuf_sz);
-		memset(tdata->dst, 0, tdata->dst_sz);
-		__builtin___clear_cache(tdata->dst, tdata->dst + tdata->dst_sz);
 		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz, opts);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
 			goto out_run;
 		}
 		__builtin___clear_cache(tdata->dst, tdata->dst + tdata->dst_sz);
-		//__builtin___clear_cache(tbuf, tbuf + tbuf_sz);
 		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
 		if (ret) {
 			printf("Fail to generate MD5 (%d)\n", ret);
 			goto out_run;
 		}
-		//dump_md5(&final_md5);
 		ret = cmp_md5(&tdata->md5, &final_md5);
 		if (ret) {
 			printf("MD5 is unmatched (%d) at %dth times on "
