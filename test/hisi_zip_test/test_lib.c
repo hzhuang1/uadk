@@ -477,6 +477,7 @@ void *hw_dfl_sw_ifl(void *arg)
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out_run;
 		}
+		__builtin___clear_cache(tbuf, tbuf + tbuf_sz);
 		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
