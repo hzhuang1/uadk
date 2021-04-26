@@ -1066,6 +1066,14 @@ static int run_self_test(void)
 	if (ret)
 		printf("Fail on running test_sw_dfl_hw_ifl():%d\n", ret);
 	f_ret |= ret;
+	ret = test_hw_dfl_sw_ifl(&opts);
+	if (ret)
+		printf("Fail on running test_hw_dfl_sw_ifl():%d\n", ret);
+	f_ret |= ret;
+	ret = test_hw_dfl_hw_ifl(&opts);
+	if (ret)
+		printf("Fail on running test_hw_dfl_hw_ifl():%d\n", ret);
+	f_ret |= ret;
 	opts.sync_mode = 1;
 	opts.thread_num = 2;
 	opts.compact_run_num = 100;
