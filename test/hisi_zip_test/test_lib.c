@@ -455,6 +455,7 @@ void *hw_dfl_sw_ifl(void *arg)
 	size_t tbuf_sz;
 	comp_md5_t final_md5;
 	int i, ret;
+	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -471,6 +472,9 @@ void *hw_dfl_sw_ifl(void *arg)
 		goto out;
 	}
 
+	total_blks = opts->compact_run_num * opts->thread_num *
+		     (opts->total_len / opts->block_size);
+	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz, opts);
 		if (ret) {
@@ -524,6 +528,7 @@ void *hw_dfl_hw_ifl(void *arg)
 	size_t tbuf_sz;
 	comp_md5_t final_md5;
 	int i, ret;
+	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -547,17 +552,22 @@ void *hw_dfl_hw_ifl(void *arg)
 		goto out_buf;
 	}
 
+	total_blks = opts->compact_run_num * opts->thread_num * 2 *
+		     (opts->total_len / opts->block_size);
+	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz, opts);
 		if (ret) {
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out_run;
 		}
+		__builtin___clear_cache(tbuf, tbuf + tbuf_sz);
 		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz, opts);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
 			goto out_run;
 		}
+		__builtin___clear_cache(tdata->dst, tdata->dst + tdata->dst_sz);
 		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
 		if (ret) {
 			printf("Fail to generate MD5 (%d)\n", ret);

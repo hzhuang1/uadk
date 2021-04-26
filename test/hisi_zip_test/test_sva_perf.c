@@ -821,17 +821,6 @@ out:
 static int test_hw_dfl_sw_ifl(struct test_options *opts)
 {
 	struct hizip_test_info info = {0};
-#if 0
-	struct test_options opts = {
-		.alg_type		= WD_ZLIB,
-		.sync_mode		= 1,
-		.thread_num		= 2,
-		.q_num			= 16,
-		.block_size		= 8192,
-		.total_len		= 8192 * 4,
-		.compact_run_num	= 30,
-	};
-#endif
 	struct timeval start_tvl, end_tvl;
 	struct wd_sched *sched = NULL;
 	double ilen, usec, speed;
@@ -849,7 +838,7 @@ static int test_hw_dfl_sw_ifl(struct test_options *opts)
 	ret = create_send2_threads(opts, &info, hw_dfl_sw_ifl);
 	if (ret)
 		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func, 1);
+	ret = create_poll2_threads(opts, &info, poll2_thread_func, 8);
 	if (ret)
 		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
@@ -880,17 +869,6 @@ out:
 static int test_hw_dfl_hw_ifl(struct test_options *opts)
 {
 	struct hizip_test_info info = {0};
-#if 0
-	struct test_options opts = {
-		.alg_type		= WD_ZLIB,
-		.sync_mode		= 0,
-		.thread_num		= 16,
-		.q_num			= 16,
-		.block_size		= 8192,
-		.total_len		= 8192 * 10,
-		.compact_run_num	= 1000,
-	};
-#endif
 	struct timeval start_tvl, end_tvl;
 	struct wd_sched *sched = NULL;
 	double ilen, usec, speed;
@@ -907,11 +885,14 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 		goto out;
 	ret = create_send2_threads(opts, &info, hw_dfl_hw_ifl);
 	if (ret)
-		goto out_thd;
+		goto out_send;
+	ret = create_poll2_threads(opts, &info, poll2_thread_func, 8);
+	if (ret)
+		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
 	ret = attach_threads(opts, &info);
 	if (ret)
-		goto out_thd;
+		goto out_poll;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
@@ -924,7 +905,9 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
-out_thd:
+out_poll:
+	free_threads(&info);
+out_send:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
