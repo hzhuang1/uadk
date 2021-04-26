@@ -653,6 +653,7 @@ void *hw_ifl_perf(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_ifl;
 	int i, ret;
+	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -662,6 +663,9 @@ void *hw_ifl_perf(void *arg)
 	if (!h_ifl)
 		return (void *)(uintptr_t)(-EINVAL);
 
+	total_blks = opts->compact_run_num * opts->thread_num *
+		     (opts->total_len / opts->block_size);
+	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_inflate(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
 				 opts);

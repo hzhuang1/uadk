@@ -886,7 +886,7 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 	ret = create_send2_threads(opts, &info, hw_dfl_hw_ifl);
 	if (ret)
 		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func, 1);
+	ret = create_poll2_threads(opts, &info, poll2_thread_func, 2);
 	if (ret)
 		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
@@ -980,11 +980,14 @@ static int test_hw_ifl_perf(struct test_options *opts)
 		goto out;
 	ret = create_send3_threads(opts, &info, hw_ifl_perf);
 	if (ret)
-		goto out_thd;
+		goto out_send;
+	ret = create_poll2_threads(opts, &info, poll2_thread_func, 1);
+	if (ret)
+		goto out_poll;
 	gettimeofday(&start_tvl, NULL);
 	ret = attach_threads(opts, &info);
 	if (ret)
-		goto out_thd;
+		goto out_send;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
@@ -996,7 +999,9 @@ static int test_hw_ifl_perf(struct test_options *opts)
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
-out_thd:
+out_poll:
+	free_threads(&info);
+out_send:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -1057,10 +1062,14 @@ static int run_self_test(void)
 	if (ret)
 		printf("Fail on running test_hw_dfl_hw_ifl():%d\n", ret);
 	f_ret |= ret;
-	opts.thread_num = 2;
+	opts.thread_num = 1;
 	ret = test_hw_dfl_perf(&opts);
 	if (ret)
 		printf("Fail on running test_hw_dfl_perf():%d\n", ret);
+	f_ret |= ret;
+	ret = test_hw_ifl_perf(&opts);
+	if (ret)
+		printf("Fail on running test_hw_ifl_perf():%d\n", ret);
 	f_ret |= ret;
 	if (!f_ret)
 		printf("Run self test successfully!\n");
