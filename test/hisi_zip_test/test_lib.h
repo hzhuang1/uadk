@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <openssl/md5.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -95,6 +96,8 @@ typedef struct _thread_data_t {
 	struct hizip_test_info *info;
 	struct wd_comp_req req;
 	comp_md5_t md5;
+	int tid;	/* thread ID */
+	sem_t sem;
 	void *src;
 	void *dst;
 	size_t src_sz;
@@ -132,6 +135,7 @@ struct hizip_test_info {
 
 void *send_thread_func(void *arg);
 void *poll_thread_func(void *arg);
+void *poll2_thread_func(void *arg);
 void *sw_dfl_sw_ifl(void *arg);
 void *sw_dfl_hw_ifl(void *arg);
 void *hw_dfl_sw_ifl(void *arg);
@@ -153,6 +157,11 @@ int create_send3_threads(struct test_options *opts,
 int create_poll_threads(struct hizip_test_info *info,
 			void *(*poll_thread_func)(void *arg),
 			int num);
+int create_poll2_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*send_thread_func)(void *arg),
+			 int poll_num
+			);
 int attach_threads(struct test_options *opts,
 		   struct hizip_test_info *info);
 void free_threads(struct hizip_test_info *info);
