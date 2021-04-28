@@ -702,7 +702,6 @@ out:
 
 void *poll2_thread_func(void *arg)
 {
-	thread_data_t *tdata = (thread_data_t *)arg;
 	__u32 received;
 	int ret = 0, total_recv = 0;
 	struct timeval start_tvl, end_tvl;
@@ -727,10 +726,6 @@ void *poll2_thread_func(void *arg)
 	}
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
-	printf("Poll thread %d costs %f usec to receive %d.\n",
-		tdata->tid,
-		(double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec),
-		local_sum);
 	pthread_exit(NULL);
 }
 
@@ -1502,10 +1497,10 @@ int create_poll2_threads(struct test_options *opts,
 	thread_data_t *tdatas;
 	int i, j, ret;
 
-	if (poll_num <= 0)
-		return -EINVAL;
 	if (opts->sync_mode == 0)
 		return 0;
+	else if (poll_num <= 0)
+		return -EINVAL;
 	info->poll_tnum = poll_num;
 	info->poll_tds = calloc(1, sizeof(pthread_t) * poll_num);
 	if (!info->poll_tds)

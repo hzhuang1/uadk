@@ -52,7 +52,10 @@ struct test_options {
 	/* tasks running in parallel */
 	int compact_run_num;
 
+	/* send thread number */
 	int thread_num;
+	/* poll thread number -- ASYNC */
+	int poll_num;
 	/* 0: sync mode, 1: async mode */
 	int sync_mode;
 
