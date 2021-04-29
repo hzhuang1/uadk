@@ -21,7 +21,7 @@ struct check_rand_ctx {
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static int count = 0;
-static int sum_pend = 0, sum_expect = 0, sum_recv = 0;
+static int sum_pend = 0, sum_thread_end = 0;
 
 static struct wd_ctx_config *g_conf;
 
@@ -394,7 +394,6 @@ void *sw_dfl_hw_ifl(void *arg)
 	comp_md5_t final_md5;
 	int i, ret;
 	struct timeval start_tvl, end_tvl;
-	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -411,9 +410,6 @@ void *sw_dfl_hw_ifl(void *arg)
 		goto out;
 	}
 
-	total_blks = opts->compact_run_num * opts->thread_num *
-		     (opts->total_len / opts->block_size);
-	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	gettimeofday(&start_tvl, NULL);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
@@ -448,6 +444,8 @@ void *sw_dfl_hw_ifl(void *arg)
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_ifl);
@@ -471,7 +469,6 @@ void *hw_dfl_sw_ifl(void *arg)
 	size_t tbuf_sz;
 	comp_md5_t final_md5;
 	int i, ret;
-	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -488,9 +485,6 @@ void *hw_dfl_sw_ifl(void *arg)
 		goto out;
 	}
 
-	total_blks = opts->compact_run_num * opts->thread_num *
-		     (opts->total_len / opts->block_size);
-	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
 				 opts, &tdata->sem);
@@ -521,6 +515,8 @@ void *hw_dfl_sw_ifl(void *arg)
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_dfl);
@@ -544,7 +540,6 @@ void *hw_dfl_hw_ifl(void *arg)
 	size_t tbuf_sz;
 	comp_md5_t final_md5;
 	int i, ret;
-	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -568,9 +563,6 @@ void *hw_dfl_hw_ifl(void *arg)
 		goto out_buf;
 	}
 
-	total_blks = opts->compact_run_num * opts->thread_num * 2 *
-		     (opts->total_len / opts->block_size);
-	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
 				 opts, &tdata->sem);
@@ -603,6 +595,8 @@ void *hw_dfl_hw_ifl(void *arg)
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
 	free(tbuf);
@@ -625,7 +619,6 @@ void *hw_dfl_perf(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_dfl;
 	int i, ret;
-	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -635,9 +628,6 @@ void *hw_dfl_perf(void *arg)
 	if (!h_dfl)
 		return (void *)(uintptr_t)(-EINVAL);
 
-	total_blks = opts->compact_run_num * opts->thread_num *
-		     (opts->total_len / opts->block_size);
-	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
 				 opts, &tdata->sem);
@@ -649,6 +639,8 @@ void *hw_dfl_perf(void *arg)
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out:
 	free(tdata->dst);
@@ -667,7 +659,6 @@ void *hw_ifl_perf(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_ifl;
 	int i, ret;
-	int total_blks;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -677,9 +668,6 @@ void *hw_ifl_perf(void *arg)
 	if (!h_ifl)
 		return (void *)(uintptr_t)(-EINVAL);
 
-	total_blks = opts->compact_run_num * opts->thread_num *
-		     (opts->total_len / opts->block_size);
-	__atomic_store_n(&sum_expect, total_blks, __ATOMIC_RELEASE);
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_inflate(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
 				 opts, &tdata->sem);
@@ -691,6 +679,8 @@ void *hw_ifl_perf(void *arg)
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out:
 	free(tdata->dst);
@@ -703,26 +693,29 @@ out:
 
 void *poll2_thread_func(void *arg)
 {
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
 	__u32 received;
-	int ret = 0, total_recv = 0;
+	int ret = 0;
 	struct timeval start_tvl, end_tvl;
-	int pending, local_sum = 0;
+	int pending;
+	int end_threads;
 
 	gettimeofday(&start_tvl, NULL);
-	while (sum_expect > total_recv) {
+	while (1) {
+		end_threads = __atomic_load_n(&sum_thread_end,
+					      __ATOMIC_ACQUIRE);
 		pending = __atomic_load_n(&sum_pend, __ATOMIC_ACQUIRE);
-		if (pending == 0)
+		if ((end_threads == info->send_tnum) && (pending == 0))
+			break;
+		else if (pending == 0)
 			continue;
 		received = 0;
 		ret = wd_comp_poll(pending, &received);
 		if (ret == 0) {
-			total_recv = __atomic_add_fetch(&sum_recv,
-							received,
-							__ATOMIC_ACQ_REL);
 			__atomic_sub_fetch(&sum_pend,
 					   received,
 					   __ATOMIC_ACQ_REL);
-			local_sum += received;
 		}
 	}
 	gettimeofday(&end_tvl, NULL);
@@ -1634,7 +1627,7 @@ int init_ctx_config(struct test_options *opts, void *priv,
 
 
 	__atomic_store_n(&sum_pend, 0, __ATOMIC_RELEASE);
-	__atomic_store_n(&sum_recv, 0, __ATOMIC_RELEASE);
+	__atomic_store_n(&sum_thread_end, 0, __ATOMIC_RELEASE);
 	*sched = sample_sched_alloc(SCHED_POLICY_RR, 2, 2, lib_poll_func);
 	if (!*sched) {
 		WD_ERR("sample_sched_alloc fail\n");
