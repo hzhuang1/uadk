@@ -1511,11 +1511,11 @@ int create_poll2_threads(struct test_options *opts,
 		ret = -ENOMEM;
 		goto out;
 	}
-	tdatas->info = info;
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 	for (i = 0; i < poll_num; i++) {
 		tdatas[i].tid = i;
+		tdatas[i].info = info;
 		ret = sem_init(&tdatas[i].sem, 0, 0);
 		if (ret < 0)
 			goto out_sem;
