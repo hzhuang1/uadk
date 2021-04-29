@@ -811,8 +811,9 @@ static int test_sw_dfl_hw_ifl(struct test_options *opts)
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
 	printf("Mixture of SW compress and HW %s decompress with %s "
-	       "at %.2fMB/s in %f usec.\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec);
+	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
+	       opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -866,8 +867,9 @@ static int test_hw_dfl_sw_ifl(struct test_options *opts)
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
 	printf("Mixture of HW %s compress and SW decompress with %s "
-	       "at %.2fMB/s in %f usec.\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec);
+	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
+	       opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -921,10 +923,10 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
 	printf("Mixture of HW %s compress and HW %s decompress with %s "
-	       "at %.2fMB/s in %f usec.\n",
+	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       opts->sync_mode ? "ASYNC" : "SYNC",
 	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       zbuf, speed, usec);
+	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -977,8 +979,9 @@ static int test_hw_dfl_perf(struct test_options *opts)
 			opts->thread_num, opts->poll_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s compress with %s at %.2fMB/s in %f usec.\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec);
+	printf("HW %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
+	       opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -1031,8 +1034,9 @@ static int test_hw_ifl_perf(struct test_options *opts)
 			opts->thread_num, opts->poll_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s decompress with %s at %.2fMB/s in %f usec.\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec);
+	printf("HW %s decompress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
+	       opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -1063,7 +1067,7 @@ static int run_self_test(void)
 	if (ret)
 		printf("Fail on running test_sw_dfl_sw_ifl():%d\n", ret);
 	f_ret |= ret;
-	for (i = 0; i < 5; i++) {
+	for (i = 0; i < 10; i++) {
 		switch (i) {
 		case 0:
 			opts.sync_mode = 0;
@@ -1084,6 +1088,26 @@ static int run_self_test(void)
 		case 4:
 			opts.sync_mode = 1; 	opts.poll_num = 8;
 			opts.block_size = 8192; opts.total_len = 8192 * 10;
+			break;
+		case 5:
+			opts.sync_mode = 0;
+			opts.block_size = 1024; opts.total_len = 8192 * 10;
+			break;
+		case 6:
+			opts.sync_mode = 1; 	opts.poll_num = 1;
+			opts.block_size = 1024; opts.total_len = 8192 * 10;
+			break;
+		case 7:
+			opts.sync_mode = 1; 	opts.poll_num = 2;
+			opts.block_size = 1024; opts.total_len = 8192 * 10;
+			break;
+		case 8:
+			opts.sync_mode = 1;	opts.poll_num = 4;
+			opts.block_size = 1024;	opts.total_len = 8192 * 10;
+			break;
+		case 9:
+			opts.sync_mode = 1; 	opts.poll_num = 8;
+			opts.block_size = 1024; opts.total_len = 8192 * 10;
 			break;
 		default:
 			return -EINVAL;
