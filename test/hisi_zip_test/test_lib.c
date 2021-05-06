@@ -105,6 +105,25 @@ static void *async2_cb(struct wd_comp_req *req, void *data)
 	return NULL;
 }
 
+static void *async3_cb(struct wd_comp_req *req, void *data)
+{
+	thread_data_t *tdata = (thread_data_t *)data;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	sem_t *sem = &tdata->sem;
+	int ret;
+
+	if (sem) {
+		ret = __atomic_add_fetch(&tdata->pcnt, 1, __ATOMIC_ACQ_REL);
+		if (ret == opts->batch_num) {
+			__atomic_store_n(&tdata->bcnt, 0, __ATOMIC_RELEASE);
+			__atomic_store_n(&tdata->pcnt, 0, __ATOMIC_RELEASE);
+			sem_post(sem);
+		}
+	}
+	return NULL;
+}
+
 static int chunk_deflate(void *in, void *out, struct test_options *opts)
 {
 	size_t chunk_sz = opts->block_size;
@@ -363,6 +382,113 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 							   1,
 							   __ATOMIC_ACQ_REL);
 					sem_wait(sem);
+				}
+			} else
+				ret = wd_do_comp_sync(h_ifl, &req);
+			if (ret == -WD_EBUSY) {
+				usleep(10);
+				continue;
+			}
+		} while (0);
+		if (ret)
+			return ret;
+		req.src += chunk_sz * EXPANSION_RATIO;
+		req.src_len = chunk_sz * EXPANSION_RATIO;
+		req.dst += chunk_sz;
+		req.dst_len = chunk_sz;
+		sum += chunk_sz;
+	} while (!ret && (sum < out_sz));
+	return 0;
+}
+
+int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata)
+{
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_req req = {0};
+	off_t off;
+	int ret = 0, bcnt = 0;
+
+	req.src = in;
+	req.src_len = opts->block_size;
+	req.dst = out;
+	req.dst_len = opts->block_size * EXPANSION_RATIO;
+	req.op_type = WD_DIR_COMPRESS;
+	if (opts->sync_mode) {
+		req.cb = async3_cb;
+		req.cb_param = tdata;
+	}
+
+	for (off = 0; off < in_sz; off += opts->block_size) {
+		do {
+			if (opts->sync_mode) {
+				ret = wd_do_comp_async(h_dfl, &req);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend,
+							   1,
+							   __ATOMIC_ACQ_REL);
+					bcnt = __atomic_add_fetch(
+							&tdata->bcnt,
+							1,
+							__ATOMIC_ACQ_REL);
+					if (bcnt == opts->batch_num) {
+						sem_wait(&tdata->sem);
+					}
+				}
+			} else
+				ret = wd_do_comp_sync(h_dfl, &req);
+			if (ret == -WD_EBUSY) {
+				usleep(10);
+				continue;
+			}
+		} while (0);
+		if (ret)
+			return ret;
+		req.src += opts->block_size;
+		req.src_len = opts->block_size;
+		req.dst += opts->block_size * EXPANSION_RATIO;
+		req.dst_len = opts->block_size * EXPANSION_RATIO;
+	}
+	return 0;
+}
+
+int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata)
+{
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_req req = {0};
+	size_t sum = 0, out_sz, chunk_sz;
+	int ret = 0, bcnt = 0;
+
+	out_sz = in_sz / EXPANSION_RATIO;
+	chunk_sz = opts->block_size;
+	req.src = in;
+	req.src_len = chunk_sz * EXPANSION_RATIO;
+	req.dst = out;
+	req.dst_len = chunk_sz;
+	req.op_type = WD_DIR_DECOMPRESS;
+	if (opts->sync_mode) {
+		req.cb = async3_cb;
+		req.cb_param = tdata;
+	}
+
+	do {
+		do {
+			if (opts->sync_mode) {
+				ret = wd_do_comp_async(h_ifl, &req);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend,
+							   1,
+							   __ATOMIC_ACQ_REL);
+					bcnt = __atomic_add_fetch(
+							&tdata->bcnt,
+							1,
+							__ATOMIC_ACQ_REL);
+					if (bcnt == opts->batch_num) {
+						sem_wait(&tdata->sem);
+					}
 				}
 			} else
 				ret = wd_do_comp_sync(h_ifl, &req);
@@ -670,6 +796,88 @@ void *hw_ifl_perf(void *arg)
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_inflate(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
 				 opts, &tdata->sem);
+		if (ret)
+			goto out;
+	}
+	wd_comp_free_sess(h_ifl);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
+	return NULL;
+out:
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	wd_comp_free_sess(h_ifl);
+	return (void *)(uintptr_t)(ret);
+}
+
+/* BATCH mode is used */
+void *hw_dfl_perf2(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_dfl;
+	int i, ret;
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_COMPRESS;
+
+	h_dfl = wd_comp_alloc_sess(&setup);
+	if (!h_dfl)
+		return (void *)(uintptr_t)(-EINVAL);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = hw_deflate2(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
+				  tdata);
+		if (ret)
+			goto out;
+	}
+	wd_comp_free_sess(h_dfl);
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
+	return NULL;
+out:
+	free(tdata->dst);
+	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
+	if (!ret)
+		free(tdata->src);
+	wd_comp_free_sess(h_dfl);
+	return (void *)(uintptr_t)(ret);
+}
+
+/* BATCH mode is used */
+void *hw_ifl_perf2(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_ifl;
+	int i, ret;
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_DECOMPRESS;
+
+	h_ifl = wd_comp_alloc_sess(&setup);
+	if (!h_ifl)
+		return (void *)(uintptr_t)(-EINVAL);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		ret = hw_inflate2(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
+				  tdata);
 		if (ret)
 			goto out;
 	}
