@@ -56,8 +56,14 @@ struct test_options {
 	int thread_num;
 	/* poll thread number -- ASYNC */
 	int poll_num;
-	/* 0: sync mode, 1: async mode */
+	/* 0: sync operation, 1: async operation */
 	int sync_mode;
+	/*
+	 * positive value: the number of messages are sent at a time.
+	 * 0: batch mode is disabled.
+	 * batch mode is only valid for ASYNC operations.
+	 */
+	int batch_num;
 
 	/* 0: pbuffer, 1: sgl */
 	__u8 data_fmt;
@@ -100,6 +106,8 @@ typedef struct _thread_data_t {
 	struct wd_comp_req req;
 	comp_md5_t md5;
 	int tid;	/* thread ID */
+	int bcnt;	/* batch mode: count */
+	int pcnt;	/* batch mode: poll count */
 	sem_t sem;
 	void *src;
 	void *dst;
@@ -145,6 +153,8 @@ void *hw_dfl_sw_ifl(void *arg);
 void *hw_dfl_hw_ifl(void *arg);
 void *hw_dfl_perf(void *arg);
 void *hw_ifl_perf(void *arg);
+void *hw_dfl_perf2(void *arg);
+void *hw_ifl_perf2(void *arg);
 int create_send_threads(struct test_options *opts,
 			struct hizip_test_info *info,
 			void *(*send_thread_func)(void *arg)
