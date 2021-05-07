@@ -21,9 +21,9 @@ struct check_rand_ctx {
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static int count = 0;
-static int sum_pend = 0, sum_thread_end = 0;
-
 static struct wd_ctx_config *g_conf;
+
+int sum_pend = 0, sum_thread_end = 0;
 
 void *mmap_alloc(size_t len)
 {
@@ -43,7 +43,7 @@ void *mmap_alloc(size_t len)
 	return p == MAP_FAILED ? NULL : p;
 }
 
-static void gen_random_data(void *buf, size_t len)
+void gen_random_data(void *buf, size_t len)
 {
 	int i;
 	uint32_t seed = 0;
@@ -54,7 +54,7 @@ static void gen_random_data(void *buf, size_t len)
 		*((uint64_t *)buf + i) = nrand48(rand_state);
 }
 
-static int calculate_md5(comp_md5_t *md5, const void *buf, size_t len)
+int calculate_md5(comp_md5_t *md5, const void *buf, size_t len)
 {
 	if (!md5 || !buf || !len)
 		return -EINVAL;
@@ -64,7 +64,7 @@ static int calculate_md5(comp_md5_t *md5, const void *buf, size_t len)
 	return 0;
 }
 
-static void dump_md5(comp_md5_t *md5)
+void dump_md5(comp_md5_t *md5)
 {
 	int i;
 
@@ -73,7 +73,7 @@ static void dump_md5(comp_md5_t *md5)
 	printf("%02x\n", md5->md[i]);
 }
 
-static int cmp_md5(comp_md5_t *orig, comp_md5_t *final)
+int cmp_md5(comp_md5_t *orig, comp_md5_t *final)
 {
 	int i;
 
@@ -255,59 +255,6 @@ int sw_inflate(void *in, void *out, size_t in_sz, struct test_options *opts)
 		sum += opts->block_size;
 	} while (!ret && (sum < out_sz));
 	return 0;
-}
-
-void *sw_dfl_sw_ifl(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	void *tbuf;
-	size_t tbuf_sz;
-	comp_md5_t final_md5;
-	int i, ret;
-
-	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
-	if (!tbuf)
-		return (void *)(uintptr_t)(-ENOMEM);
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
-		if (ret) {
-			printf("Fail to deflate by zlib: %d\n", ret);
-			goto out;
-		}
-		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
-		if (ret) {
-			printf("Fail to inflate by zlib: %d\n", ret);
-			goto out;
-		}
-		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
-		if (ret) {
-			printf("Fail to generate MD5 (%d)\n", ret);
-			goto out;
-		}
-		ret = cmp_md5(&tdata->md5, &final_md5);
-		if (ret) {
-			printf("MD5 is unmatched (%d) at %dth times on "
-				"thread %d\n", ret, i, tdata->tid);
-			goto out;
-		}
-	}
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	return NULL;
-out:
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	return (void *)(uintptr_t)(ret);
 }
 
 int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
@@ -506,396 +453,6 @@ int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 		sum += chunk_sz;
 	} while (!ret && (sum < out_sz));
 	return 0;
-}
-
-void *sw_dfl_hw_ifl(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_ifl;
-	void *tbuf;
-	size_t tbuf_sz;
-	comp_md5_t final_md5;
-	int i, ret;
-	struct timeval start_tvl, end_tvl;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_DECOMPRESS;
-
-	h_ifl = wd_comp_alloc_sess(&setup);
-	if (!h_ifl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
-	if (!tbuf) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	gettimeofday(&start_tvl, NULL);
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
-		if (ret) {
-			printf("Fail to deflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz,
-				 opts, &tdata->sem);
-		if (ret) {
-			printf("Fail to inflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
-		if (ret) {
-			printf("Fail to generate MD5 (%d)\n", ret);
-			goto out_run;
-		}
-		ret = cmp_md5(&tdata->md5, &final_md5);
-		if (ret) {
-			printf("MD5 is unmatched (%d) at %dth times on "
-				"thread %d\n", ret, i, tdata->tid);
-			goto out_run;
-		}
-	}
-	gettimeofday(&end_tvl, NULL);
-	wd_comp_free_sess(h_ifl);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out_run:
-	wd_comp_free_sess(h_ifl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-out:
-	return (void *)(uintptr_t)(ret);
-}
-
-void *hw_dfl_sw_ifl(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_dfl;
-	void *tbuf;
-	size_t tbuf_sz;
-	comp_md5_t final_md5;
-	int i, ret;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_COMPRESS;
-
-	h_dfl = wd_comp_alloc_sess(&setup);
-	if (!h_dfl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
-	if (!tbuf) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
-				 opts, &tdata->sem);
-		if (ret) {
-			printf("Fail to deflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
-		if (ret) {
-			printf("Fail to inflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
-		if (ret) {
-			printf("Fail to generate MD5 (%d)\n", ret);
-			goto out_run;
-		}
-		ret = cmp_md5(&tdata->md5, &final_md5);
-		if (ret) {
-			printf("MD5 is unmatched (%d) at %dth times on "
-				"thread %d\n", ret, i, tdata->tid);
-			goto out_run;
-		}
-	}
-	wd_comp_free_sess(h_dfl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out_run:
-	wd_comp_free_sess(h_dfl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-out:
-	return (void *)(uintptr_t)(ret);
-}
-
-void *hw_dfl_hw_ifl(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_dfl, h_ifl;
-	void *tbuf;
-	size_t tbuf_sz;
-	comp_md5_t final_md5;
-	int i, ret;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_COMPRESS;
-
-	h_dfl = wd_comp_alloc_sess(&setup);
-	if (!h_dfl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	setup.op_type = WD_DIR_DECOMPRESS;
-	h_ifl = wd_comp_alloc_sess(&setup);
-	if (!h_ifl) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
-	if (!tbuf) {
-		ret = -ENOMEM;
-		goto out_buf;
-	}
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
-				 opts, &tdata->sem);
-		if (ret) {
-			printf("Fail to deflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz,
-				 opts, &tdata->sem);
-		if (ret) {
-			printf("Fail to inflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
-		if (ret) {
-			printf("Fail to generate MD5 (%d)\n", ret);
-			goto out_run;
-		}
-		ret = cmp_md5(&tdata->md5, &final_md5);
-		if (ret) {
-			printf("MD5 is unmatched (%d) at %dth times on "
-				"thread %d\n", ret, i, tdata->tid);
-			goto out_run;
-		}
-	}
-	wd_comp_free_sess(h_dfl);
-	wd_comp_free_sess(h_ifl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out_run:
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-out_buf:
-	wd_comp_free_sess(h_ifl);
-out:
-	wd_comp_free_sess(h_dfl);
-	return (void *)(uintptr_t)(ret);
-}
-
-void *hw_dfl_perf(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_dfl;
-	int i, ret;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_COMPRESS;
-
-	h_dfl = wd_comp_alloc_sess(&setup);
-	if (!h_dfl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_deflate(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
-				 opts, &tdata->sem);
-		if (ret)
-			goto out;
-	}
-	wd_comp_free_sess(h_dfl);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	wd_comp_free_sess(h_dfl);
-	return (void *)(uintptr_t)(ret);
-}
-
-void *hw_ifl_perf(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_ifl;
-	int i, ret;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_DECOMPRESS;
-
-	h_ifl = wd_comp_alloc_sess(&setup);
-	if (!h_ifl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_inflate(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
-				 opts, &tdata->sem);
-		if (ret)
-			goto out;
-	}
-	wd_comp_free_sess(h_ifl);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	wd_comp_free_sess(h_ifl);
-	return (void *)(uintptr_t)(ret);
-}
-
-/* BATCH mode is used */
-void *hw_dfl_perf2(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_dfl;
-	int i, ret;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_COMPRESS;
-
-	h_dfl = wd_comp_alloc_sess(&setup);
-	if (!h_dfl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_deflate2(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
-				  tdata);
-		if (ret)
-			goto out;
-	}
-	wd_comp_free_sess(h_dfl);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	wd_comp_free_sess(h_dfl);
-	return (void *)(uintptr_t)(ret);
-}
-
-/* BATCH mode is used */
-void *hw_ifl_perf2(void *arg)
-{
-	thread_data_t *tdata = (thread_data_t *)arg;
-	struct hizip_test_info *info = tdata->info;
-	struct test_options *opts = info->opts;
-	struct wd_comp_sess_setup setup = {0};
-	handle_t h_ifl;
-	int i, ret;
-
-        setup.alg_type = opts->alg_type;
-        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
-        setup.op_type = WD_DIR_DECOMPRESS;
-
-	h_ifl = wd_comp_alloc_sess(&setup);
-	if (!h_ifl)
-		return (void *)(uintptr_t)(-EINVAL);
-
-	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_inflate2(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
-				  tdata);
-		if (ret)
-			goto out;
-	}
-	wd_comp_free_sess(h_ifl);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	/* mark sending thread to end */
-	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
-	return NULL;
-out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
-	wd_comp_free_sess(h_ifl);
-	return (void *)(uintptr_t)(ret);
 }
 
 void *poll2_thread_func(void *arg)
