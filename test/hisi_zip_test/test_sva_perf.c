@@ -1244,6 +1244,46 @@ static int run_self_test(void)
 		f_ret |= ret;
 	}
 	printf("Start BATCH mode test for ASYNC...\n");
+	for (i = 0; i < 6; i++) {
+		opts.sync_mode = 1;
+		opts.block_size = 8192;	opts.total_len = 8192 * 128;
+		switch (i) {
+		case 0:
+			opts.batch_num = 4;	opts.poll_num = 1;
+			opts.thread_num = 1;
+			break;
+		case 1:
+			opts.batch_num = 8;	opts.poll_num = 1;
+			opts.thread_num = 1;
+			break;
+		case 2:
+			opts.batch_num = 16;	opts.poll_num = 1;
+			opts.thread_num = 1;
+			break;
+		case 3:
+			opts.batch_num = 32;	opts.poll_num = 1;
+			opts.thread_num = 1;
+			break;
+		case 4:
+			opts.batch_num = 64;	opts.poll_num = 1;
+			opts.thread_num = 1;
+			break;
+		case 5:
+			opts.batch_num = 128;	opts.poll_num = 1;
+			opts.thread_num = 1;
+			break;
+		default:
+			return -EINVAL;
+		}
+		ret = test_hw_dfl_perf2(&opts);
+		if (ret)
+			printf("Fail on test_hw_dfl_perf():%d\n", ret);
+		f_ret |= ret;
+		ret = test_hw_ifl_perf2(&opts);
+		if (ret)
+			printf("Fail on test_hw_ifl_perf():%d\n", ret);
+		f_ret |= ret;
+	}
 	for (i = 0; i < 20; i++) {
 		opts.sync_mode = 1;
 		opts.block_size = 1024; opts.total_len = 8192 * 16;
