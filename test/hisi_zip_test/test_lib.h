@@ -144,17 +144,16 @@ struct hizip_test_info {
 	} tv;
 };
 
+extern int sum_pend, sum_thread_end;
+
+void gen_random_data(void *buf, size_t len);
+int calculate_md5(comp_md5_t *md5, const void *buf, size_t len);
+void dump_md5(comp_md5_t *md5);
+int cmp_md5(comp_md5_t *orig, comp_md5_t *final);
+int run_self_test(void);
 void *send_thread_func(void *arg);
 void *poll_thread_func(void *arg);
 void *poll2_thread_func(void *arg);
-void *sw_dfl_sw_ifl(void *arg);
-void *sw_dfl_hw_ifl(void *arg);
-void *hw_dfl_sw_ifl(void *arg);
-void *hw_dfl_hw_ifl(void *arg);
-void *hw_dfl_perf(void *arg);
-void *hw_ifl_perf(void *arg);
-void *hw_dfl_perf2(void *arg);
-void *hw_ifl_perf2(void *arg);
 int create_send_threads(struct test_options *opts,
 			struct hizip_test_info *info,
 			void *(*send_thread_func)(void *arg)
@@ -197,6 +196,17 @@ int hizip_verify_random_output(struct test_options *opts,
 void *mmap_alloc(size_t len);
 int lib_poll_func(__u32 pos, __u32 expect, __u32 *count);
 typedef int (*check_output_fn)(unsigned char *buf, unsigned int size, void *opaque);
+
+int sw_deflate(void *in, void *out, size_t in_sz, struct test_options *opts);
+int sw_inflate(void *in, void *out, size_t in_sz, struct test_options *opts);
+int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
+	       struct test_options *opts, sem_t *sem);
+int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
+	       struct test_options *opts, sem_t *sem);
+int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata);
+int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata);
 
 /* for block interface */
 int hw_blk_compress(int alg_type, int blksize, __u8 data_fmt, void *priv,
