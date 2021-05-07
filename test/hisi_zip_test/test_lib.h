@@ -108,6 +108,7 @@ typedef struct _thread_data_t {
 	int tid;	/* thread ID */
 	int bcnt;	/* batch mode: count */
 	int pcnt;	/* batch mode: poll count */
+	int flush_bcnt;	/* batch mode: flush count that is less batch_num */
 	sem_t sem;
 	void *src;
 	void *dst;
