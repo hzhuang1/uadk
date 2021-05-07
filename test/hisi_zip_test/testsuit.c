@@ -958,7 +958,8 @@ int run_self_test(void)
 	printf("Start BATCH mode test for ASYNC...\n");
 	for (i = 0; i < 6; i++) {
 		opts.sync_mode = 1;
-		opts.block_size = 8192;	opts.total_len = 8192 * 128;
+		/* test boundary while batch_num is 64 or 128 */
+		opts.block_size = 8192;	opts.total_len = 8192 * 80;
 		switch (i) {
 		case 0:
 			opts.batch_num = 4;	opts.poll_num = 1;

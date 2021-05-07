@@ -111,13 +111,21 @@ static void *async3_cb(struct wd_comp_req *req, void *data)
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
 	sem_t *sem = &tdata->sem;
-	int ret;
+	int ret, flush_bcnt;
 
 	if (sem) {
 		ret = __atomic_add_fetch(&tdata->pcnt, 1, __ATOMIC_ACQ_REL);
+		flush_bcnt = __atomic_load_n(&tdata->flush_bcnt, __ATOMIC_ACQUIRE);
 		if (ret == opts->batch_num) {
 			__atomic_store_n(&tdata->bcnt, 0, __ATOMIC_RELEASE);
 			__atomic_store_n(&tdata->pcnt, 0, __ATOMIC_RELEASE);
+			sem_post(sem);
+		} else if (flush_bcnt && (ret == flush_bcnt)) {
+			__atomic_store_n(&tdata->bcnt, 0, __ATOMIC_RELEASE);
+			__atomic_store_n(&tdata->pcnt, 0, __ATOMIC_RELEASE);
+			__atomic_store_n(&tdata->flush_bcnt,
+					 0,
+					 __ATOMIC_RELEASE);
 			sem_post(sem);
 		}
 	}
@@ -379,7 +387,27 @@ int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 							&tdata->bcnt,
 							1,
 							__ATOMIC_ACQ_REL);
-					if (bcnt == opts->batch_num) {
+					/*
+					 * If accumulated sent requests equal
+					 * to batch_num, stop until all of
+					 * them are received by polling.
+					 *
+					 * In another tail case, stop too.
+					 * In the test, the same dst buffer in
+					 * one thread will be used repeatly.
+					 * If the pending requests of current
+					 * operation are not flushed in time,
+					 * it may impact the next operation
+					 * on the same dst buffer.
+					 */
+					if (bcnt == opts->batch_num)
+						sem_wait(&tdata->sem);
+					else if ((off + opts->block_size) ==
+						 in_sz) {
+						__atomic_store_n(
+							&tdata->flush_bcnt,
+							bcnt,
+							__ATOMIC_RELEASE);
 						sem_wait(&tdata->sem);
 					}
 				}
@@ -433,7 +461,14 @@ int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 							&tdata->bcnt,
 							1,
 							__ATOMIC_ACQ_REL);
-					if (bcnt == opts->batch_num) {
+					/* See comments in hw_deflate2(). */
+					if (bcnt == opts->batch_num)
+						sem_wait(&tdata->sem);
+					else if ((sum + chunk_sz) >= out_sz) {
+						__atomic_store_n(
+							&tdata->flush_bcnt,
+							bcnt,
+							__ATOMIC_RELEASE);
 						sem_wait(&tdata->sem);
 					}
 				}
