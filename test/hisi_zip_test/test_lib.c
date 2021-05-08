@@ -20,10 +20,25 @@ struct check_rand_ctx {
 };
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_spinlock_t lock;
 static int count = 0;
 static struct wd_ctx_config *g_conf;
 
 int sum_pend = 0, sum_thread_end = 0;
+
+__attribute__((constructor))
+void lock_constructor(void)
+{
+	if (pthread_spin_init(&lock, PTHREAD_PROCESS_SHARED) != 0)
+		exit(1);
+}
+
+__attribute__((destructor))
+void lock_destructor(void)
+{
+	if (pthread_spin_destroy(&lock) != 0)
+		exit(1);
+}
 
 void *mmap_alloc(size_t len)
 {
@@ -105,6 +120,7 @@ static void *async2_cb(struct wd_comp_req *req, void *data)
 	return NULL;
 }
 
+/* used in BATCH mode */
 static void *async3_cb(struct wd_comp_req *req, void *data)
 {
 	thread_data_t *tdata = (thread_data_t *)data;
@@ -129,6 +145,22 @@ static void *async3_cb(struct wd_comp_req *req, void *data)
 			sem_post(sem);
 		}
 	}
+	return NULL;
+}
+
+/* used in BATCH mode */
+static void *async4_cb(struct wd_comp_req *req, void *data)
+{
+	thread_data_t *tdata = (thread_data_t *)data;
+
+	pthread_spin_lock(&lock);
+	tdata->pcnt++;
+	if (tdata->batch_flag && (tdata->pcnt == tdata->bcnt)) {
+		tdata->pcnt = 0;
+		tdata->bcnt = 0;
+		__atomic_store_n(&tdata->batch_flag, 0, __ATOMIC_RELEASE);
+	}
+	pthread_spin_unlock(&lock);
 	return NULL;
 }
 
@@ -348,6 +380,7 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	return 0;
 }
 
+/* used in BATCH mode */
 int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	        thread_data_t *tdata)
 {
@@ -416,6 +449,7 @@ int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	return 0;
 }
 
+/* used in BATCH mode */
 int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	        thread_data_t *tdata)
 {
@@ -460,6 +494,137 @@ int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 						sem_wait(&tdata->sem);
 					}
 				}
+			} else
+				ret = wd_do_comp_sync(h_ifl, &req);
+		} while (ret == -WD_EBUSY);
+		if (ret)
+			return ret;
+		req.src += chunk_sz * EXPANSION_RATIO;
+		req.src_len = chunk_sz * EXPANSION_RATIO;
+		req.dst += chunk_sz;
+		req.dst_len = chunk_sz;
+		sum += chunk_sz;
+	} while (!ret && (sum < out_sz));
+	return 0;
+}
+
+/* used in BATCH mode */
+int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata)
+{
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_req req = {0};
+	off_t off;
+	int ret = 0, flag;
+
+	req.src = in;
+	req.src_len = opts->block_size;
+	req.dst = out;
+	req.dst_len = opts->block_size * EXPANSION_RATIO;
+	req.op_type = WD_DIR_COMPRESS;
+	if (opts->sync_mode) {
+		req.cb = async4_cb;
+		req.cb_param = tdata;
+	}
+
+	for (off = 0; off < in_sz; off += opts->block_size) {
+		do {
+			if (opts->sync_mode) {
+				do {
+					flag = __atomic_load_n(
+						&tdata->batch_flag,
+						__ATOMIC_ACQUIRE);
+				} while (flag);
+				pthread_spin_lock(&lock);
+				ret = wd_do_comp_async(h_dfl, &req);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend,
+							   1,
+							   __ATOMIC_ACQ_REL);
+					tdata->bcnt++;
+					/*
+					 * If accumulated sent requests equal
+					 * to batch_num, stop until all of
+					 * them are received by polling.
+					 *
+					 * In another tail case, stop too.
+					 * In the test, the same dst buffer in
+					 * one thread will be used repeatly.
+					 * If the pending requests of current
+					 * operation are not flushed in time,
+					 * it may impact the next operation
+					 * on the same dst buffer.
+					 */
+					if ((tdata->bcnt == opts->batch_num) ||
+					    ((off + opts->block_size) == in_sz)) {
+						__atomic_store_n(
+							&tdata->batch_flag,
+							1,
+							__ATOMIC_RELEASE);
+					}
+				}
+				pthread_spin_unlock(&lock);
+			} else
+				ret = wd_do_comp_sync(h_dfl, &req);
+		} while (ret == -WD_EBUSY);
+		if (ret) {
+			return ret;
+		}
+		req.src += opts->block_size;
+		req.src_len = opts->block_size;
+		req.dst += opts->block_size * EXPANSION_RATIO;
+		req.dst_len = opts->block_size * EXPANSION_RATIO;
+	}
+	return 0;
+}
+
+/* used in BATCH mode */
+int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata)
+{
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_req req = {0};
+	size_t sum = 0, out_sz, chunk_sz;
+	int ret = 0, flag;
+
+	out_sz = in_sz / EXPANSION_RATIO;
+	chunk_sz = opts->block_size;
+	req.src = in;
+	req.src_len = chunk_sz * EXPANSION_RATIO;
+	req.dst = out;
+	req.dst_len = chunk_sz;
+	req.op_type = WD_DIR_DECOMPRESS;
+	if (opts->sync_mode) {
+		req.cb = async4_cb;
+		req.cb_param = tdata;
+	}
+
+	do {
+		do {
+			if (opts->sync_mode) {
+				do {
+					flag = __atomic_load_n(
+						&tdata->batch_flag,
+						__ATOMIC_ACQUIRE);
+				} while (flag);
+				pthread_spin_lock(&lock);
+				ret = wd_do_comp_async(h_ifl, &req);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend,
+							   1,
+							   __ATOMIC_ACQ_REL);
+					tdata->bcnt++;
+					if ((tdata->bcnt == opts->batch_num) ||
+					    ((sum + chunk_sz) >= out_sz)) {
+						__atomic_store_n(
+							&tdata->batch_flag,
+							1,
+							__ATOMIC_RELEASE);
+					}
+				}
+				pthread_spin_unlock(&lock);
 			} else
 				ret = wd_do_comp_sync(h_ifl, &req);
 		} while (ret == -WD_EBUSY);

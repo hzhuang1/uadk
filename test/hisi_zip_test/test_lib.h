@@ -109,6 +109,12 @@ typedef struct _thread_data_t {
 	int bcnt;	/* batch mode: count */
 	int pcnt;	/* batch mode: poll count */
 	int flush_bcnt;	/* batch mode: flush count that is less batch_num */
+	/*
+	 * batch mode: set flag and wait batch end in sending thread.
+	 * Clear batch flag if pcnt == bcnt in polling thread.
+	 * batch_flag could replace flush_bcnt.
+	 */
+	int batch_flag;
 	sem_t sem;
 	void *src;
 	void *dst;
@@ -207,6 +213,10 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	        thread_data_t *tdata);
 int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata);
+int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
+	        thread_data_t *tdata);
+int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	        thread_data_t *tdata);
 
 /* for block interface */
