@@ -294,11 +294,7 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 				}
 			} else
 				ret = wd_do_comp_sync(h_dfl, &req);
-			if (ret == -WD_EBUSY) {
-				usleep(10);
-				continue;
-			}
-		} while (0);
+		} while (ret == -WD_EBUSY);
 		if (ret)
 			return ret;
 		req.src += opts->block_size;
@@ -340,11 +336,7 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 				}
 			} else
 				ret = wd_do_comp_sync(h_ifl, &req);
-			if (ret == -WD_EBUSY) {
-				usleep(10);
-				continue;
-			}
-		} while (0);
+		} while (ret == -WD_EBUSY);
 		if (ret)
 			return ret;
 		req.src += chunk_sz * EXPANSION_RATIO;
@@ -413,11 +405,7 @@ int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 				}
 			} else
 				ret = wd_do_comp_sync(h_dfl, &req);
-			if (ret == -WD_EBUSY) {
-				usleep(10);
-				continue;
-			}
-		} while (0);
+		} while (ret == -WD_EBUSY);
 		if (ret)
 			return ret;
 		req.src += opts->block_size;
@@ -474,11 +462,7 @@ int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 				}
 			} else
 				ret = wd_do_comp_sync(h_ifl, &req);
-			if (ret == -WD_EBUSY) {
-				usleep(10);
-				continue;
-			}
-		} while (0);
+		} while (ret == -WD_EBUSY);
 		if (ret)
 			return ret;
 		req.src += chunk_sz * EXPANSION_RATIO;
