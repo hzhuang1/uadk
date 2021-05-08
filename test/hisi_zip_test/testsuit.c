@@ -958,32 +958,28 @@ int run_self_test(void)
 		f_ret |= ret;
 	}
 	printf("Start BATCH mode test for ASYNC...\n");
-	for (i = 0; i < 6; i++) {
+	for (i = 0; i < 5; i++) {
 		opts.sync_mode = 1;
 		/* test boundary while batch_num is 64 or 128 */
 		opts.block_size = 8192;	opts.total_len = 8192 * 80;
 		switch (i) {
 		case 0:
-			opts.batch_num = 4;	opts.poll_num = 1;
-			opts.thread_num = 1;
-			break;
-		case 1:
 			opts.batch_num = 8;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
-		case 2:
+		case 1:
 			opts.batch_num = 16;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
-		case 3:
+		case 2:
 			opts.batch_num = 32;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
-		case 4:
+		case 3:
 			opts.batch_num = 64;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
-		case 5:
+		case 4:
 			opts.batch_num = 128;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
@@ -999,88 +995,108 @@ int run_self_test(void)
 			printf("Fail on test_hw_ifl_perf():%d\n", ret);
 		f_ret |= ret;
 	}
-	for (i = 0; i < 20; i++) {
+	for (i = 0; i < 25; i++) {
 		opts.sync_mode = 1;
 		opts.block_size = 1024; opts.total_len = 8192 * 16;
 		switch (i) {
 		case 0:
-			opts.batch_num = 4; 	opts.poll_num = 1;
+			opts.batch_num = 8; 	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
 		case 1:
-			opts.batch_num = 8;	opts.poll_num = 1;
+			opts.batch_num = 16;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
 		case 2:
-			opts.batch_num = 16; 	opts.poll_num = 1;
+			opts.batch_num = 32; 	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
 		case 3:
-			opts.batch_num = 32;	opts.poll_num = 1;
+			opts.batch_num = 64;	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
 		case 4:
-			opts.batch_num = 64; 	opts.poll_num = 1;
+			opts.batch_num = 128; 	opts.poll_num = 1;
 			opts.thread_num = 1;
 			break;
 		case 5:
-			opts.batch_num = 128;	opts.poll_num = 1;
-			opts.thread_num = 1;
+			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.thread_num = 2;
 			break;
 		case 6:
-			opts.batch_num = 4; 	opts.poll_num = 1;
+			opts.batch_num = 16;	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 7:
-			opts.batch_num = 8;	opts.poll_num = 1;
+			opts.batch_num = 32; 	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 8:
-			opts.batch_num = 16; 	opts.poll_num = 1;
+			opts.batch_num = 64;	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 9:
-			opts.batch_num = 32;	opts.poll_num = 1;
+			opts.batch_num = 128; 	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 10:
-			opts.batch_num = 64; 	opts.poll_num = 1;
-			opts.thread_num = 2;
+			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.thread_num = 4;
 			break;
 		case 11:
-			opts.batch_num = 4;	opts.poll_num = 1;
+			opts.batch_num = 16;	opts.poll_num = 1;
 			opts.thread_num = 4;
 			break;
 		case 12:
-			opts.batch_num = 8; 	opts.poll_num = 1;
-			opts.thread_num = 4;
-			break;
-		case 13:
-			opts.batch_num = 16;	opts.poll_num = 1;
-			opts.thread_num = 4;
-			break;
-		case 14:
 			opts.batch_num = 32; 	opts.poll_num = 1;
 			opts.thread_num = 4;
 			break;
+		case 13:
+			opts.batch_num = 64;	opts.poll_num = 1;
+			opts.thread_num = 4;
+			break;
+		case 14:
+			opts.batch_num = 128; 	opts.poll_num = 1;
+			opts.thread_num = 4;
+			break;
 		case 15:
-			opts.batch_num = 4;	opts.poll_num = 1;
+			opts.batch_num = 8;	opts.poll_num = 1;
 			opts.thread_num = 8;
 			break;
 		case 16:
-			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.batch_num = 16; 	opts.poll_num = 1;
 			opts.thread_num = 8;
 			break;
 		case 17:
-			opts.batch_num = 16;	opts.poll_num = 1;
+			opts.batch_num = 32;	opts.poll_num = 1;
 			opts.thread_num = 8;
 			break;
 		case 18:
-			opts.batch_num = 4; 	opts.poll_num = 1;
-			opts.thread_num = 16;
+			opts.batch_num = 64;	opts.poll_num = 1;
+			opts.thread_num = 8;
 			break;
 		case 19:
-			opts.batch_num = 8;	opts.poll_num = 1;
+			opts.batch_num = 128; 	opts.poll_num = 1;
+			opts.thread_num = 8;
+			break;
+		case 20:
+			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.thread_num = 16;
+			break;
+		case 21:
+			opts.batch_num = 16;	opts.poll_num = 1;
+			opts.thread_num = 16;
+			break;
+		case 22:
+			opts.batch_num = 32;	opts.poll_num = 1;
+			opts.thread_num = 16;
+			break;
+		case 23:
+			opts.batch_num = 64;	opts.poll_num = 1;
+			opts.thread_num = 16;
+			break;
+		case 24:
+			opts.batch_num = 128; 	opts.poll_num = 1;
 			opts.thread_num = 16;
 			break;
 		default:
