@@ -516,7 +516,7 @@ int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	struct test_options *opts = info->opts;
 	struct wd_comp_req req = {0};
 	off_t off;
-	int ret = 0, flag;
+	int ret = 0, flag, bsize;
 
 	req.src = in;
 	req.src_len = opts->block_size;
@@ -528,53 +528,64 @@ int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
 		req.cb_param = tdata;
 	}
 
-	for (off = 0; off < in_sz; off += opts->block_size) {
-		do {
-			if (opts->sync_mode) {
-				do {
-					flag = __atomic_load_n(
-						&tdata->batch_flag,
-						__ATOMIC_ACQUIRE);
-				} while (flag);
-				pthread_spin_lock(&lock);
+	bsize = opts->block_size;
+	if (opts->sync_mode) {
+		for (off = 0; off < in_sz;) {
+			do {
+				flag = __atomic_load_n(
+					&tdata->batch_flag,
+					__ATOMIC_ACQUIRE);
+			} while (flag);
+			pthread_spin_lock(&lock);
+			while (1) {
 				ret = wd_do_comp_async(h_dfl, &req);
-				if (!ret) {
-					__atomic_add_fetch(&sum_pend,
-							   1,
-							   __ATOMIC_ACQ_REL);
-					tdata->bcnt++;
-					/*
-					 * If accumulated sent requests equal
-					 * to batch_num, stop until all of
-					 * them are received by polling.
-					 *
-					 * In another tail case, stop too.
-					 * In the test, the same dst buffer in
-					 * one thread will be used repeatly.
-					 * If the pending requests of current
-					 * operation are not flushed in time,
-					 * it may impact the next operation
-					 * on the same dst buffer.
-					 */
-					if ((tdata->bcnt == opts->batch_num) ||
-					    ((off + opts->block_size) == in_sz)) {
-						__atomic_store_n(
-							&tdata->batch_flag,
-							1,
-							__ATOMIC_RELEASE);
-					}
+				if (ret == -WD_EBUSY) {
+					continue;
+				} else if (ret < 0) {
+					pthread_spin_unlock(&lock);
+					return ret;
 				}
-				pthread_spin_unlock(&lock);
-			} else
-				ret = wd_do_comp_sync(h_dfl, &req);
-		} while (ret == -WD_EBUSY);
-		if (ret) {
-			return ret;
+				__atomic_add_fetch(&sum_pend, 1,
+						   __ATOMIC_ACQ_REL);
+				tdata->bcnt++;
+				/*
+				 * If accumulated sent requests equal to
+				 * batch_num, stop until all of them are
+				 * received by polling.
+				 *
+				 * If reach the tail, stop to send, too.
+				 * In the test, the same dst buffer in one
+				 * thread will be used repeatly. If the
+				 * pending requests of current operation are
+				 * not flushed in time, it may impact the next
+				 * operation on the same dst buffer.
+				 */
+				req.src += bsize;
+				req.src_len = bsize;
+				req.dst += bsize * EXPANSION_RATIO;
+				req.dst_len = bsize * EXPANSION_RATIO;
+				off += bsize;
+				if ((tdata->bcnt == opts->batch_num) ||
+				    (off == in_sz)) {
+					__atomic_store_n(&tdata->batch_flag, 1,
+							 __ATOMIC_RELEASE);
+					break;
+				}
+			}
+			pthread_spin_unlock(&lock);
 		}
-		req.src += opts->block_size;
-		req.src_len = opts->block_size;
-		req.dst += opts->block_size * EXPANSION_RATIO;
-		req.dst_len = opts->block_size * EXPANSION_RATIO;
+	} else {
+		for (off = 0; off < in_sz; off += opts->block_size) {
+			do {
+				ret = wd_do_comp_sync(h_dfl, &req);
+			} while (ret == -WD_EBUSY);
+			if (ret)
+				return ret;
+			req.src += bsize;
+			req.src_len = bsize;
+			req.dst += bsize * EXPANSION_RATIO;
+			req.dst_len = bsize * EXPANSION_RATIO;
+		}
 	}
 	return 0;
 }
@@ -601,41 +612,53 @@ int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
 		req.cb_param = tdata;
 	}
 
-	do {
+	if (opts->sync_mode) {
 		do {
-			if (opts->sync_mode) {
-				do {
-					flag = __atomic_load_n(
-						&tdata->batch_flag,
-						__ATOMIC_ACQUIRE);
-				} while (flag);
-				pthread_spin_lock(&lock);
+			do {
+				flag = __atomic_load_n(
+					&tdata->batch_flag,
+					__ATOMIC_ACQUIRE);
+			} while (flag);
+			pthread_spin_lock(&lock);
+			while (1) {
 				ret = wd_do_comp_async(h_ifl, &req);
-				if (!ret) {
-					__atomic_add_fetch(&sum_pend,
-							   1,
-							   __ATOMIC_ACQ_REL);
-					tdata->bcnt++;
-					if ((tdata->bcnt == opts->batch_num) ||
-					    ((sum + chunk_sz) >= out_sz)) {
-						__atomic_store_n(
-							&tdata->batch_flag,
-							1,
-							__ATOMIC_RELEASE);
-					}
+				if (ret == -WD_EBUSY) {
+					continue;
+				} else if (ret < 0) {
+					pthread_spin_unlock(&lock);
+					return ret;
 				}
-				pthread_spin_unlock(&lock);
-			} else
+				__atomic_add_fetch(&sum_pend, 1,
+						   __ATOMIC_ACQ_REL);
+				tdata->bcnt++;
+				req.src += chunk_sz * EXPANSION_RATIO;
+				req.src_len = chunk_sz * EXPANSION_RATIO;
+				req.dst += chunk_sz;
+				req.dst_len = chunk_sz;
+				sum += chunk_sz;
+				if ((tdata->bcnt == opts->batch_num) ||
+				    (sum >= out_sz)) {
+					__atomic_store_n(&tdata->batch_flag, 1,
+							 __ATOMIC_RELEASE);
+					break;
+				}
+			}
+			pthread_spin_unlock(&lock);
+		} while (!ret && (sum < out_sz));
+	} else {
+		do {
+			do {
 				ret = wd_do_comp_sync(h_ifl, &req);
-		} while (ret == -WD_EBUSY);
-		if (ret)
-			return ret;
-		req.src += chunk_sz * EXPANSION_RATIO;
-		req.src_len = chunk_sz * EXPANSION_RATIO;
-		req.dst += chunk_sz;
-		req.dst_len = chunk_sz;
-		sum += chunk_sz;
-	} while (!ret && (sum < out_sz));
+			} while (ret == -WD_EBUSY);
+			if (ret)
+				return ret;
+			req.src += chunk_sz * EXPANSION_RATIO;
+			req.src_len = chunk_sz * EXPANSION_RATIO;
+			req.dst += chunk_sz;
+			req.dst_len = chunk_sz;
+			sum += chunk_sz;
+		} while (!ret && (sum < out_sz));
+	}
 	return 0;
 }
 
