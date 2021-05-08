@@ -382,7 +382,8 @@ static void *hw_dfl_perf2(void *arg)
 		return (void *)(uintptr_t)(-EINVAL);
 
 	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_deflate2(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
+		/* hw_deflate2() equals to hw_deflate3() */
+		ret = hw_deflate3(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
 				  tdata);
 		if (ret)
 			goto out;
@@ -423,7 +424,8 @@ static void *hw_ifl_perf2(void *arg)
 		return (void *)(uintptr_t)(-EINVAL);
 
 	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_inflate2(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
+		/* hw_inflate2() equals to hw_inflate3() */
+		ret = hw_inflate3(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
 				  tdata);
 		if (ret)
 			goto out;
