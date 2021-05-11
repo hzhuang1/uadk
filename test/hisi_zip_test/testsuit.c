@@ -212,6 +212,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 	size_t tbuf_sz;
 	comp_md5_t final_md5;
 	int i, ret;
+	__u32 tmp_sz, tout_sz;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -236,19 +237,41 @@ static void *hw_dfl_hw_ifl(void *arg)
 	}
 
 	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
-				 opts, &tdata->sem);
-		if (ret) {
-			printf("Fail to deflate by zlib: %d\n", ret);
-			goto out_run;
+		if (opts->is_stream) {
+			tmp_sz = tbuf_sz;
+			ret = hw_stream_compress(opts->alg_type,
+						 opts->block_size,
+						 opts->data_fmt, tbuf, &tmp_sz,
+						 tdata->src, tdata->src_sz);
+			if (ret) {
+				printf("Fail to deflate by zlib: %d\n", ret);
+				goto out_run;
+			}
+			tout_sz = tdata->dst_sz;
+			ret = hw_stream_decompress(opts->alg_type,
+						   opts->block_size,
+						   opts->data_fmt, tdata->dst,
+						   &tout_sz, tbuf, tmp_sz);
+			if (ret) {
+				printf("Fail to inflate by zlib: %d\n", ret);
+				goto out_run;
+			}
+		} else {
+			ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
+					 opts, &tdata->sem);
+			if (ret) {
+				printf("Fail to deflate by zlib: %d\n", ret);
+				goto out_run;
+			}
+			ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz,
+					 opts, &tdata->sem);
+			if (ret) {
+				printf("Fail to inflate by zlib: %d\n", ret);
+				goto out_run;
+			}
+			tout_sz = tbuf_sz / EXPANSION_RATIO;
 		}
-		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz,
-				 opts, &tdata->sem);
-		if (ret) {
-			printf("Fail to inflate by zlib: %d\n", ret);
-			goto out_run;
-		}
-		ret = calculate_md5(&final_md5, tdata->dst, tdata->dst_sz);
+		ret = calculate_md5(&final_md5, tdata->dst, (size_t)tout_sz);
 		if (ret) {
 			printf("Fail to generate MD5 (%d)\n", ret);
 			goto out_run;
@@ -607,7 +630,8 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 
 	info.opts = opts;
 	info.in_size = opts->total_len;
-	info.out_size = opts->total_len;
+	/* Need destination buffer larger (especially in stream mode). */
+	info.out_size = opts->total_len + 4096;
 	info.list = get_dev_list(opts, 1);
 	if (!info.list)
 		return -EINVAL;
@@ -636,10 +660,12 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 			opts->thread_num, opts->poll_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("Mixture of HW %s compress and HW %s decompress with %s "
+	printf("Mixture of HW %s %s compress and HW %s %s decompress with %s "
 	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       opts->sync_mode ? "ASYNC" : "SYNC",
+	       opts->is_stream ? "STREAM" : "BLOCK",
 	       opts->sync_mode ? "ASYNC" : "SYNC",
+	       opts->is_stream ? "STREAM" : "BLOCK",
 	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
@@ -693,9 +719,10 @@ static int test_hw_dfl_perf(struct test_options *opts)
 			opts->thread_num, opts->poll_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
-	       opts->block_size);
+	printf("HW %s %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC",
+	       opts->is_stream ? "STREAM" : "BLOCK",
+	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -748,9 +775,10 @@ static int test_hw_ifl_perf(struct test_options *opts)
 			opts->thread_num, opts->poll_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s decompress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
-	       opts->block_size);
+	printf("HW %s %s decompress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC",
+	       opts->is_stream ? "STREAM" : "BLOCK",
+	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -803,9 +831,10 @@ static int test_hw_dfl_perf2(struct test_options *opts)
 			opts->thread_num, opts->poll_num, opts->batch_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
-	       opts->block_size);
+	printf("HW %s %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC",
+	       opts->is_stream ? "STREAM" : "BLOCK",
+	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -858,9 +887,11 @@ static int test_hw_ifl_perf2(struct test_options *opts)
 			opts->thread_num, opts->poll_num, opts->batch_num);
 	} else
 		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s decompress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
-	       opts->block_size);
+	printf("HW %s %s decompress with %s at %.2fMB/s in %f usec "
+	       "(Bsize:%d).\n",
+	       opts->sync_mode ? "ASYNC" : "SYNC",
+	       opts->is_stream ? "STREAM" : "BLOCK",
+	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -891,6 +922,23 @@ int run_self_test(void)
 	if (ret)
 		printf("Fail on running test_sw_dfl_sw_ifl():%d\n", ret);
 	f_ret |= ret;
+	for (i = 0; i < 1; i++) {
+		opts.sync_mode = 0;
+		opts.is_stream = 1;
+		ret = test_hw_dfl_hw_ifl(&opts);
+		if (ret)
+			printf("Fail on test_hw_dfl_hw_ifl():%d\n", ret);
+		f_ret |= ret;
+		ret = test_hw_dfl_perf(&opts);
+		if (ret)
+			printf("Fail on test_hw_dfl_perf():%d\n", ret);
+		f_ret |= ret;
+		ret = test_hw_ifl_perf(&opts);
+		if (ret)
+			printf("Fail on test_hw_ifl_perf():%d\n", ret);
+		f_ret |= ret;
+	}
+	opts.is_stream = 0;	/* restore to BLOCK mode */
 	for (i = 0; i < 10; i++) {
 		switch (i) {
 		case 0:
