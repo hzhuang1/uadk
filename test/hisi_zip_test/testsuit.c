@@ -489,13 +489,17 @@ static int test_sw_dfl_sw_ifl(void)
 	info.opts = &opts;
 	info.in_size = opts.total_len;
 	info.out_size = opts.total_len;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf)
+		return -ENOMEM;
+	gen_random_data(info.in_buf, info.in_size);
 	ret = create_send2_threads(&opts, &info, sw_dfl_sw_ifl);
 	if (ret)
-		return ret;
+		goto out;
 	gettimeofday(&start_tvl, NULL);
 	ret = attach_threads(&opts, &info);
 	if (ret)
-		return ret;
+		goto out;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
@@ -505,6 +509,9 @@ static int test_sw_dfl_sw_ifl(void)
 	       "at %.2fMB/s in %f usec.\n", opts.thread_num, speed, usec);
 	free_threads(&info);
 	return 0;
+out:
+	free(info.in_buf);
+	return ret;
 }
 
 static int test_sw_dfl_hw_ifl(struct test_options *opts)
@@ -525,6 +532,12 @@ static int test_sw_dfl_hw_ifl(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	gen_random_data(info.in_buf, info.in_size);
 	ret = create_send2_threads(opts, &info, sw_dfl_hw_ifl);
 	if (ret)
 		goto out_send;
@@ -557,6 +570,8 @@ static int test_sw_dfl_hw_ifl(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+	free(info.in_buf);
+out_src:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -581,6 +596,12 @@ static int test_hw_dfl_sw_ifl(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	gen_random_data(info.in_buf, info.in_size);
 	ret = create_send2_threads(opts, &info, hw_dfl_sw_ifl);
 	if (ret)
 		goto out_send;
@@ -613,6 +634,8 @@ static int test_hw_dfl_sw_ifl(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+	free(info.in_buf);
+out_src:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -638,6 +661,12 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	gen_random_data(info.in_buf, info.in_size);
 	ret = create_send2_threads(opts, &info, hw_dfl_hw_ifl);
 	if (ret)
 		goto out_send;
@@ -673,6 +702,8 @@ static int test_hw_dfl_hw_ifl(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+	free(info.in_buf);
+out_src:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -697,6 +728,12 @@ static int test_hw_dfl_perf(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	gen_random_data(info.in_buf, info.in_size);
 	ret = create_send2_threads(opts, &info, hw_dfl_perf);
 	if (ret)
 		goto out_send;
@@ -729,6 +766,8 @@ static int test_hw_dfl_perf(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+	free(info.in_buf);
+out_src:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -743,6 +782,8 @@ static int test_hw_ifl_perf(struct test_options *opts)
 	double ilen, usec, speed;
 	char zbuf[60];
 	int ret;
+	size_t tbuf_sz;
+	void *tbuf;
 
 	info.opts = opts;
 	info.in_size = opts->total_len * EXPANSION_RATIO;
@@ -753,7 +794,22 @@ static int test_hw_ifl_perf(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
-	ret = create_send3_threads(opts, &info, hw_ifl_perf);
+	tbuf_sz = opts->total_len;
+	tbuf = malloc(tbuf_sz);
+	if (!tbuf) {
+		ret = -ENOMEM;
+		goto out_buf;
+	}
+	gen_random_data(tbuf, tbuf_sz);
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	ret = sw_deflate(tbuf, info.in_buf, tbuf_sz, opts);
+	if (ret)
+		goto out_dfl;
+	ret = create_send2_threads(opts, &info, hw_ifl_perf);
 	if (ret)
 		goto out_send;
 	ret = create_poll2_threads(opts, &info, poll2_thread_func,
@@ -785,6 +841,11 @@ static int test_hw_ifl_perf(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+out_dfl:
+	free(info.in_buf);
+out_src:
+	free(tbuf);
+out_buf:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -809,6 +870,12 @@ static int test_hw_dfl_perf2(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	gen_random_data(info.in_buf, info.in_size);
 	ret = create_send2_threads(opts, &info, hw_dfl_perf2);
 	if (ret)
 		goto out_send;
@@ -841,6 +908,8 @@ static int test_hw_dfl_perf2(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+	free(info.in_buf);
+out_src:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);
@@ -855,6 +924,8 @@ static int test_hw_ifl_perf2(struct test_options *opts)
 	double ilen, usec, speed;
 	char zbuf[60];
 	int ret;
+	size_t tbuf_sz;
+	void *tbuf;
 
 	info.opts = opts;
 	info.in_size = opts->total_len * EXPANSION_RATIO;
@@ -865,7 +936,22 @@ static int test_hw_ifl_perf2(struct test_options *opts)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out;
-	ret = create_send3_threads(opts, &info, hw_ifl_perf2);
+	tbuf_sz = opts->total_len;
+	tbuf = malloc(tbuf_sz);
+	if (!tbuf) {
+		ret = -ENOMEM;
+		goto out_buf;
+	}
+	gen_random_data(tbuf, tbuf_sz);
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	ret = sw_deflate(tbuf, info.in_buf, tbuf_sz, opts);
+	if (ret)
+		goto out_dfl;
+	ret = create_send2_threads(opts, &info, hw_ifl_perf2);
 	if (ret)
 		goto out_send;
 	ret = create_poll2_threads(opts, &info, poll2_thread_func,
@@ -898,6 +984,11 @@ static int test_hw_ifl_perf2(struct test_options *opts)
 out_poll:
 	free_threads(&info);
 out_send:
+out_dfl:
+	free(info.in_buf);
+out_src:
+	free(tbuf);
+out_buf:
 	uninit_config(&info, sched);
 out:
 	wd_free_list_accels(info.list);

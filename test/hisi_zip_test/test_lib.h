@@ -169,10 +169,6 @@ int create_send2_threads(struct test_options *opts,
 			 struct hizip_test_info *info,
 			 void *(*send_thread_func)(void *arg)
 			);
-int create_send3_threads(struct test_options *opts,
-			 struct hizip_test_info *info,
-			 void *(*send_thread_func)(void *arg)
-			);
 int create_poll_threads(struct hizip_test_info *info,
 			void *(*poll_thread_func)(void *arg),
 			int num);
