@@ -505,7 +505,7 @@ static int test_sw_dfl_sw_ifl(void)
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
 	ilen = opts.total_len * opts.thread_num * opts.compact_run_num;
 	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	printf("Mixture of SW compress and SW decompress with %d threads "
+	printf("Mixature of SW compress and SW decompress with %d threads "
 	       "at %.2fMB/s in %f usec.\n", opts.thread_num, speed, usec);
 	free_threads(&info);
 	return 0;
@@ -514,302 +514,117 @@ out:
 	return ret;
 }
 
-static int test_sw_dfl_hw_ifl(struct test_options *opts)
+int test_hw(struct test_options *opts, char *model)
 {
 	struct hizip_test_info info = {0};
 	struct timeval start_tvl, end_tvl;
 	struct wd_sched *sched = NULL;
 	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
-
-	info.opts = opts;
-	info.in_size = opts->total_len;
-	info.out_size = opts->total_len;
-	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
-	ret = init_ctx_config(opts, &info, &sched);
-	if (ret)
-		goto out;
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	gen_random_data(info.in_buf, info.in_size);
-	ret = create_send2_threads(opts, &info, sw_dfl_hw_ifl);
-	if (ret)
-		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&end_tvl, NULL);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
-	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
-	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
-	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads",
-			opts->thread_num, opts->poll_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("Mixture of SW compress and HW %s decompress with %s "
-	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
-	       opts->block_size);
-	uninit_config(&info, sched);
-	free_threads(&info);
-	return 0;
-out_poll:
-	free_threads(&info);
-out_send:
-	free(info.in_buf);
-out_src:
-	uninit_config(&info, sched);
-out:
-	wd_free_list_accels(info.list);
-	return ret;
-}
-
-static int test_hw_dfl_sw_ifl(struct test_options *opts)
-{
-	struct hizip_test_info info = {0};
-	struct timeval start_tvl, end_tvl;
-	struct wd_sched *sched = NULL;
-	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
-
-	info.opts = opts;
-	info.in_size = opts->total_len;
-	info.out_size = opts->total_len;
-	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
-	ret = init_ctx_config(opts, &info, &sched);
-	if (ret)
-		goto out;
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	gen_random_data(info.in_buf, info.in_size);
-	ret = create_send2_threads(opts, &info, hw_dfl_sw_ifl);
-	if (ret)
-		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&end_tvl, NULL);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
-	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
-	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
-	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads",
-			opts->thread_num, opts->poll_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("Mixture of HW %s compress and SW decompress with %s "
-	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC", zbuf, speed, usec,
-	       opts->block_size);
-	uninit_config(&info, sched);
-	free_threads(&info);
-	return 0;
-out_poll:
-	free_threads(&info);
-out_send:
-	free(info.in_buf);
-out_src:
-	uninit_config(&info, sched);
-out:
-	wd_free_list_accels(info.list);
-	return ret;
-}
-
-static int test_hw_dfl_hw_ifl(struct test_options *opts)
-{
-	struct hizip_test_info info = {0};
-	struct timeval start_tvl, end_tvl;
-	struct wd_sched *sched = NULL;
-	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
-
-	info.opts = opts;
-	info.in_size = opts->total_len;
-	/* Need destination buffer larger (especially in stream mode). */
-	info.out_size = opts->total_len + 4096;
-	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
-	ret = init_ctx_config(opts, &info, &sched);
-	if (ret)
-		goto out;
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	gen_random_data(info.in_buf, info.in_size);
-	ret = create_send2_threads(opts, &info, hw_dfl_hw_ifl);
-	if (ret)
-		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&end_tvl, NULL);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
-	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
-	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
-	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads",
-			opts->thread_num, opts->poll_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("Mixture of HW %s %s compress and HW %s %s decompress with %s "
-	       "at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       opts->is_stream ? "STREAM" : "BLOCK",
-	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       opts->is_stream ? "STREAM" : "BLOCK",
-	       zbuf, speed, usec, opts->block_size);
-	uninit_config(&info, sched);
-	free_threads(&info);
-	return 0;
-out_poll:
-	free_threads(&info);
-out_send:
-	free(info.in_buf);
-out_src:
-	uninit_config(&info, sched);
-out:
-	wd_free_list_accels(info.list);
-	return ret;
-}
-
-static int test_hw_dfl_perf(struct test_options *opts)
-{
-	struct hizip_test_info info = {0};
-	struct timeval start_tvl, end_tvl;
-	struct wd_sched *sched = NULL;
-	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
-
-	info.opts = opts;
-	info.in_size = opts->total_len;
-	info.out_size = opts->total_len * EXPANSION_RATIO;
-	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
-	ret = init_ctx_config(opts, &info, &sched);
-	if (ret)
-		goto out;
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	gen_random_data(info.in_buf, info.in_size);
-	ret = create_send2_threads(opts, &info, hw_dfl_perf);
-	if (ret)
-		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&end_tvl, NULL);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
-	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
-	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
-	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads",
-			opts->thread_num, opts->poll_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       opts->is_stream ? "STREAM" : "BLOCK",
-	       zbuf, speed, usec, opts->block_size);
-	uninit_config(&info, sched);
-	free_threads(&info);
-	return 0;
-out_poll:
-	free_threads(&info);
-out_send:
-	free(info.in_buf);
-out_src:
-	uninit_config(&info, sched);
-out:
-	wd_free_list_accels(info.list);
-	return ret;
-}
-
-static int test_hw_ifl_perf(struct test_options *opts)
-{
-	struct hizip_test_info info = {0};
-	struct timeval start_tvl, end_tvl;
-	struct wd_sched *sched = NULL;
-	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
+	char zbuf[120];
+	int ret, zbuf_idx, ifl_flag = 0;
+	void *(*func)(void *);
 	size_t tbuf_sz;
-	void *tbuf;
+	void *tbuf = NULL;
 
+	if (!opts || !model) {
+		ret = -EINVAL;
+		goto out;
+	}
 	info.opts = opts;
-	info.in_size = opts->total_len * EXPANSION_RATIO;
-	info.out_size = opts->total_len;
+	memset(zbuf, 0, 120);
+	if (!strcmp(model, "sw_dfl_hw_ifl")) {
+		func = sw_dfl_hw_ifl;
+		info.in_size = opts->total_len;
+		info.out_size = opts->total_len;
+		zbuf_idx = sprintf(zbuf, "Mix SW deflate and HW %s %s inflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+	} else if (!strcmp(model, "hw_dfl_sw_ifl")) {
+		func = hw_dfl_sw_ifl;
+		info.in_size = opts->total_len;
+		info.out_size = opts->total_len;
+		zbuf_idx = sprintf(zbuf, "Mix HW %s %s deflate and SW inflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+	} else if (!strcmp(model, "hw_dfl_hw_ifl")) {
+		func = hw_dfl_hw_ifl;
+		info.in_size = opts->total_len;
+		info.out_size = opts->total_len + 4096;
+		zbuf_idx = sprintf(zbuf,
+				   "Mix HW %s %s deflate and HW %s %s inflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+	} else if (!strcmp(model, "hw_dfl_perf")) {
+		func = hw_dfl_perf;
+		info.in_size = opts->total_len;
+		info.out_size = opts->total_len * EXPANSION_RATIO;
+		zbuf_idx = sprintf(zbuf, "HW %s %s deflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+	} else if (!strcmp(model, "hw_dfl_perf2")) {
+		func = hw_dfl_perf2;
+		info.in_size = opts->total_len;
+		info.out_size = opts->total_len * EXPANSION_RATIO;
+		zbuf_idx = sprintf(zbuf, "HW %s %s deflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+	} else if (!strcmp(model, "hw_ifl_perf")) {
+		func = hw_ifl_perf;
+		info.in_size = opts->total_len * EXPANSION_RATIO;
+		info.out_size = opts->total_len;
+		zbuf_idx = sprintf(zbuf, "HW %s %s inflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+		ifl_flag = 1;
+	} else if (!strcmp(model, "hw_ifl_perf2")) {
+		func = hw_ifl_perf2;
+		info.in_size = opts->total_len * EXPANSION_RATIO;
+		info.out_size = opts->total_len;
+		zbuf_idx = sprintf(zbuf, "HW %s %s inflate",
+				   opts->sync_mode ? "ASYNC" : "SYNC",
+				   opts->is_stream ? "STREAM" : "BLOCK");
+		ifl_flag = 1;
+	} else {
+		printf("Wrong model is specified:%s\n", model);
+		ret = -EINVAL;
+		goto out;
+	}
+
 	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
+	if (!info.list) {
+		ret = -EINVAL;
+		goto out;
+	}
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
-		goto out;
-	tbuf_sz = opts->total_len;
-	tbuf = malloc(tbuf_sz);
-	if (!tbuf) {
-		ret = -ENOMEM;
-		goto out_buf;
+		goto out_cfg;
+	if (ifl_flag) {
+		tbuf_sz = opts->total_len;
+		tbuf = malloc(tbuf_sz);
+		if (!tbuf) {
+			ret = -ENOMEM;
+			goto out_buf;
+		}
+		gen_random_data(tbuf, tbuf_sz);
+		info.in_buf = malloc(info.in_size);
+		if (!info.in_buf) {
+			ret = -ENOMEM;
+			goto out_src;
+		}
+		ret = sw_deflate(tbuf, info.in_buf, tbuf_sz, opts);
+		if (ret)
+			goto out_dfl;
+	} else {
+		info.in_buf = malloc(info.in_size);
+		if (!info.in_buf) {
+			ret = -ENOMEM;
+			goto out_src;
+		}
+		gen_random_data(info.in_buf, info.in_size);
 	}
-	gen_random_data(tbuf, tbuf_sz);
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	ret = sw_deflate(tbuf, info.in_buf, tbuf_sz, opts);
-	if (ret)
-		goto out_dfl;
-	ret = create_send2_threads(opts, &info, hw_ifl_perf);
+	ret = create_send2_threads(opts, &info, func);
 	if (ret)
 		goto out_send;
 	ret = create_poll2_threads(opts, &info, poll2_thread_func,
@@ -819,21 +634,23 @@ static int test_hw_ifl_perf(struct test_options *opts)
 	gettimeofday(&start_tvl, NULL);
 	ret = attach_threads(opts, &info);
 	if (ret)
-		goto out_send;
+		goto out_poll;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
 	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
 	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
 	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads",
-			opts->thread_num, opts->poll_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s %s decompress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       opts->is_stream ? "STREAM" : "BLOCK",
+		zbuf_idx += sprintf(zbuf + zbuf_idx,
+				    " with %d send + %d poll threads",
+				    opts->thread_num,
+				    opts->poll_num);
+	} else {
+		zbuf_idx += sprintf(zbuf + zbuf_idx,
+				    " with %d send threads",
+				    opts->thread_num);
+	}
+	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       zbuf, speed, usec, opts->block_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
@@ -844,154 +661,14 @@ out_send:
 out_dfl:
 	free(info.in_buf);
 out_src:
-	free(tbuf);
+	if (ifl_flag && tbuf)
+		free(tbuf);
 out_buf:
 	uninit_config(&info, sched);
-out:
+out_cfg:
 	wd_free_list_accels(info.list);
-	return ret;
-}
-
-static int test_hw_dfl_perf2(struct test_options *opts)
-{
-	struct hizip_test_info info = {0};
-	struct timeval start_tvl, end_tvl;
-	struct wd_sched *sched = NULL;
-	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
-
-	info.opts = opts;
-	info.in_size = opts->total_len;
-	info.out_size = opts->total_len * EXPANSION_RATIO;
-	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
-	ret = init_ctx_config(opts, &info, &sched);
-	if (ret)
-		goto out;
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	gen_random_data(info.in_buf, info.in_size);
-	ret = create_send2_threads(opts, &info, hw_dfl_perf2);
-	if (ret)
-		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&end_tvl, NULL);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
-	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
-	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
-	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads (BATCH:%d)",
-			opts->thread_num, opts->poll_num, opts->batch_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s %s compress with %s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       opts->is_stream ? "STREAM" : "BLOCK",
-	       zbuf, speed, usec, opts->block_size);
-	uninit_config(&info, sched);
-	free_threads(&info);
-	return 0;
-out_poll:
-	free_threads(&info);
-out_send:
-	free(info.in_buf);
-out_src:
-	uninit_config(&info, sched);
 out:
-	wd_free_list_accels(info.list);
-	return ret;
-}
-
-static int test_hw_ifl_perf2(struct test_options *opts)
-{
-	struct hizip_test_info info = {0};
-	struct timeval start_tvl, end_tvl;
-	struct wd_sched *sched = NULL;
-	double ilen, usec, speed;
-	char zbuf[60];
-	int ret;
-	size_t tbuf_sz;
-	void *tbuf;
-
-	info.opts = opts;
-	info.in_size = opts->total_len * EXPANSION_RATIO;
-	info.out_size = opts->total_len;
-	info.list = get_dev_list(opts, 1);
-	if (!info.list)
-		return -EINVAL;
-	ret = init_ctx_config(opts, &info, &sched);
-	if (ret)
-		goto out;
-	tbuf_sz = opts->total_len;
-	tbuf = malloc(tbuf_sz);
-	if (!tbuf) {
-		ret = -ENOMEM;
-		goto out_buf;
-	}
-	gen_random_data(tbuf, tbuf_sz);
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	ret = sw_deflate(tbuf, info.in_buf, tbuf_sz, opts);
-	if (ret)
-		goto out_dfl;
-	ret = create_send2_threads(opts, &info, hw_ifl_perf2);
-	if (ret)
-		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
-	if (ret)
-		goto out_poll;
-	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
-	if (ret)
-		goto out_send;
-	gettimeofday(&end_tvl, NULL);
-	timersub(&end_tvl, &start_tvl, &start_tvl);
-	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
-	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
-	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
-	memset(zbuf, 0, 60);
-	if (opts->sync_mode) {
-		sprintf(zbuf, "%d send + %d poll threads (BATCH:%d)",
-			opts->thread_num, opts->poll_num, opts->batch_num);
-	} else
-		sprintf(zbuf, "%d send threads", opts->thread_num);
-	printf("HW %s %s decompress with %s at %.2fMB/s in %f usec "
-	       "(Bsize:%d).\n",
-	       opts->sync_mode ? "ASYNC" : "SYNC",
-	       opts->is_stream ? "STREAM" : "BLOCK",
-	       zbuf, speed, usec, opts->block_size);
-	uninit_config(&info, sched);
-	free_threads(&info);
-	return 0;
-out_poll:
-	free_threads(&info);
-out_send:
-out_dfl:
-	free(info.in_buf);
-out_src:
-	free(tbuf);
-out_buf:
-	uninit_config(&info, sched);
-out:
-	wd_free_list_accels(info.list);
+	printf("Fail to run %s() (%d)!\n", model, ret);
 	return ret;
 }
 
@@ -1016,18 +693,9 @@ int run_self_test(void)
 	for (i = 0; i < 1; i++) {
 		opts.sync_mode = 0;
 		opts.is_stream = 1;
-		ret = test_hw_dfl_hw_ifl(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_hw_ifl():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_dfl_perf(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_perf():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_ifl_perf(&opts);
-		if (ret)
-			printf("Fail on test_hw_ifl_perf():%d\n", ret);
-		f_ret |= ret;
+		f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
+		f_ret |= test_hw(&opts, "hw_dfl_perf");
+		f_ret |= test_hw(&opts, "hw_ifl_perf");
 	}
 	opts.is_stream = 0;	/* restore to BLOCK mode */
 	for (i = 0; i < 10; i++) {
@@ -1075,26 +743,11 @@ int run_self_test(void)
 		default:
 			return -EINVAL;
 		}
-		ret = test_sw_dfl_hw_ifl(&opts);
-		if (ret)
-			printf("Fail on test_sw_dfl_hw_ifl():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_dfl_sw_ifl(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_sw_ifl():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_dfl_hw_ifl(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_hw_ifl():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_dfl_perf(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_perf():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_ifl_perf(&opts);
-		if (ret)
-			printf("Fail on test_hw_ifl_perf():%d\n", ret);
-		f_ret |= ret;
+		f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
+		f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
+		f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
+		f_ret |= test_hw(&opts, "hw_dfl_perf");
+		f_ret |= test_hw(&opts, "hw_ifl_perf");
 	}
 	printf("Start BATCH mode test for ASYNC...\n");
 	for (i = 0; i < 5; i++) {
@@ -1125,14 +778,8 @@ int run_self_test(void)
 		default:
 			return -EINVAL;
 		}
-		ret = test_hw_dfl_perf2(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_perf():%d\n", ret);
-		f_ret |= ret;
-		ret = test_hw_ifl_perf2(&opts);
-		if (ret)
-			printf("Fail on test_hw_ifl_perf():%d\n", ret);
-		f_ret |= ret;
+		f_ret |= test_hw(&opts, "hw_dfl_perf2");
+		f_ret |= test_hw(&opts, "hw_ifl_perf2");
 	}
 	for (i = 0; i < 25; i++) {
 		opts.sync_mode = 1;
@@ -1241,15 +888,9 @@ int run_self_test(void)
 		default:
 			return -EINVAL;
 		}
-		ret = test_hw_dfl_perf2(&opts);
-		if (ret)
-			printf("Fail on test_hw_dfl_perf():%d\n", ret);
-		f_ret |= ret;
+		f_ret |= test_hw(&opts, "hw_dfl_perf2");
 		usleep(10000);
-		ret = test_hw_ifl_perf2(&opts);
-		if (ret)
-			printf("Fail on test_hw_ifl_perf():%d\n", ret);
-		f_ret |= ret;
+		f_ret |= test_hw(&opts, "hw_ifl_perf2");
 		usleep(10000);
 	}
 	printf("End BATCH mode test!\n");
