@@ -64,6 +64,10 @@ struct test_options {
 	 * batch mode is only valid for ASYNC operations.
 	 */
 	int batch_num;
+	/* input file */
+	int fd_in;
+	/* output file */
+	int fd_out;
 
 	/* 0: pbuffer, 1: sgl */
 	__u8 data_fmt;
@@ -158,6 +162,7 @@ int calculate_md5(comp_md5_t *md5, const void *buf, size_t len);
 void dump_md5(comp_md5_t *md5);
 int cmp_md5(comp_md5_t *orig, comp_md5_t *final);
 int run_self_test(void);
+int run_cmd(struct test_options *opts);
 void *send_thread_func(void *arg);
 void *poll_thread_func(void *arg);
 void *poll2_thread_func(void *arg);

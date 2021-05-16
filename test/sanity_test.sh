@@ -86,39 +86,39 @@ run_zip_test_v2()
 
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
-	zip_sva_perf -F < origin > hw.gz
-	zip_sva_perf -F -d < hw.gz > origin
+	zip_sva_perf --in origin --out hw.gz
+	zip_sva_perf -d --in hw.gz --out origin
 	md5sum -c ori.md5
 
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
-	zip_sva_perf -F -z -t 64 < origin > hw.zlib
-	zip_sva_perf -F -z -d -t 64 < hw.zlib > origin
+	zip_sva_perf -z -t 64 --in origin --out hw.zlib
+	zip_sva_perf -z -d -t 64 --in hw.zlib --out origin
 	md5sum -c ori.md5
 
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
-	zip_sva_perf -F -m 1 < origin > hw.gz
-	zip_sva_perf -F -d -m 1 < hw.gz > origin
+	zip_sva_perf -m 1 --in origin --out hw.gz
+	zip_sva_perf -d -m 1 --in hw.gz --out origin
 	md5sum -c ori.md5 || exit_code=$?
 
 
 	dd if=/dev/urandom of=origin bs=10M count=50 &> /dev/null
 	md5sum origin > ori.md5
-	zip_sva_perf -S -F < origin > hw.gz
-	zip_sva_perf -S -F -d < hw.gz > origin
+	zip_sva_perf -S --in origin --out hw.gz
+	zip_sva_perf -S --in hw.gz --out origin
 	md5sum -c ori.md5
 
 
 	dd if=/dev/urandom of=origin bs=1M count=1 &> /dev/null
 	md5sum origin > ori.md5
-	zip_sva_perf -F < origin > hw.gz
+	zip_sva_perf --in origin --out hw.gz
 	gunzip < hw.gz > origin
 	md5sum -c ori.md5
 
 	dd if=/dev/urandom of=origin bs=10M count=1 &> /dev/null
 	md5sum origin > ori.md5
-	zip_sva_perf -S -F < origin > hw.gz
+	zip_sva_perf -S --in origin --out hw.gz
 	gunzip < hw.gz > origin
 	md5sum -c ori.md5
 }

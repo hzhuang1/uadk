@@ -757,17 +757,67 @@ int main(int argc, char **argv)
 		.data_fmt		= 0,
 	};
 	struct option long_options[] = {
-		{"self",	no_argument,	0, 0 },
-		{0,		0,		0, 0 },
+		{"self",	no_argument,		0, 0 },
+		{"in",		required_argument,	0, 0 },
+		{"out",		required_argument,	0, 0 },
+		{0,		0,			0, 0 },
 	};
 	int show_help = 0;
 	int opt, option_idx;
 
+	opts.fd_in = -1;
+	opts.fd_out = -1;
 	while ((opt = getopt_long(argc, argv, COMMON_OPTSTRING "f:o:w:k:r:",
 				  long_options, &option_idx)) != -1) {
 		switch (opt) {
 		case 0:
-			return run_self_test();
+			switch (option_idx) {
+			case 0:
+				return run_self_test();
+			case 1:
+				if (optarg) {
+					opts.fd_in = open(optarg, O_RDONLY);
+					if (opts.fd_in < 0) {
+						printf("Fail to open %s\n",
+							optarg);
+						show_help = 1;
+					} else
+						opts.is_file = true;
+				} else {
+					printf("Input file is missing!\n");
+					show_help = 1;
+				}
+				if (lseek(opts.fd_in, 0, SEEK_SET) < 0) {
+					printf("Fail on lseek()!\n");
+					show_help = 1;
+				}
+				break;
+			case 2:
+				if (optarg) {
+					opts.fd_out = open(optarg,
+							   O_CREAT | O_WRONLY,
+							   S_IWUSR | S_IRGRP |
+							   S_IROTH);
+					if (opts.fd_out < 0) {
+						printf("Fail to open %s\n",
+							optarg);
+						show_help = 1;
+					} else
+						opts.is_file = true;
+				} else {
+					printf("Output file is missing!\n");
+					show_help = 1;
+				}
+				if (lseek(opts.fd_out, 0, SEEK_SET) < 0) {
+					printf("Fail on lseek()!\n");
+					show_help = 1;
+				}
+				break;
+			default:
+				show_help = 1;
+				break;
+			}
+			break;
 		case 'f':
 			if (strcmp(optarg, "none") == 0) {
 				opts.display_stats = STATS_NONE;
@@ -823,7 +873,18 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (opts.is_file) {
+		if ((opts.fd_in < 0) || (opts.fd_out < 0)) {
+			printf("Input file and output file must be specified "
+				"together!\n");
+			show_help = 1;
+		}
+	}
+
 	signal(SIGBUS, handle_sigbus);
+
+	if (!show_help)
+		return run_cmd(&opts);
 
 	hizip_test_adjust_len(&opts);
 
@@ -841,7 +902,9 @@ int main(int argc, char **argv)
 		     "  -k <mode>     kill thread\n"
 		     "                  'bind' kills the process after bind\n"
 		     "                  'tlb' tries to access an unmapped buffer\n"
-		     "                  'work' kills the process while the queue is working\n",
+		     "                  'work' kills the process while the queue is working\n"
+		     "  --in <file>   input file\n"
+		     "  --out <file>  output file\n",
 		     argv[0]
 		    );
 

@@ -1306,10 +1306,15 @@ int create_send2_threads(struct test_options *opts,
 		tdatas[i].src_sz = info->in_size;
 		tdatas[i].src = info->in_buf;
 		tdatas[i].dst_sz = info->out_size;
-		tdatas[i].dst = malloc(tdatas[i].dst_sz);
-		if (!tdatas[i].dst) {
-			ret = -ENOMEM;
-			goto out_dst;
+		if (i) {
+			tdatas[i].dst = malloc(tdatas[i].dst_sz);
+			if (!tdatas[i].dst) {
+				ret = -ENOMEM;
+				goto out_dst;
+			}
+		} else {
+			/* Thread 0 shares output buf with info->out_buf */
+			tdatas[i].dst = info->out_buf;
 		}
 		calculate_md5(&tdatas[i].md5, tdatas[i].src, tdatas[i].src_sz);
 	}
@@ -1640,9 +1645,6 @@ int parse_common_option(const char opt, const char *optarg,
 		break;
 	case 'd':
 		opts->op_type = WD_DIR_DECOMPRESS;
-		break;
-	case 'F':
-		opts->is_file = true;
 		break;
 	case 'S':
 		opts->is_stream = MODE_STREAM;

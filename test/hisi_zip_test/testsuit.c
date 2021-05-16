@@ -112,7 +112,11 @@ static void *sw_dfl_hw_ifl(void *arg)
 	wd_comp_free_sess(h_ifl);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	free(tbuf);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -183,7 +187,11 @@ static void *hw_dfl_sw_ifl(void *arg)
 	}
 	wd_comp_free_sess(h_dfl);
 	free(tbuf);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -286,7 +294,11 @@ static void *hw_dfl_hw_ifl(void *arg)
 	wd_comp_free_sess(h_dfl);
 	wd_comp_free_sess(h_ifl);
 	free(tbuf);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -330,7 +342,11 @@ static void *hw_dfl_perf(void *arg)
 			goto out;
 	}
 	wd_comp_free_sess(h_dfl);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -370,7 +386,11 @@ static void *hw_ifl_perf(void *arg)
 			goto out;
 	}
 	wd_comp_free_sess(h_ifl);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -412,7 +432,11 @@ static void *hw_dfl_perf2(void *arg)
 			goto out;
 	}
 	wd_comp_free_sess(h_dfl);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -454,7 +478,11 @@ static void *hw_ifl_perf2(void *arg)
 			goto out;
 	}
 	wd_comp_free_sess(h_ifl);
-	free(tdata->dst);
+	/* Thread 0 shares output buf with info->out_buf. */
+	if (tdata->tid)
+		free(tdata->dst);
+	else
+		info->out_size = tdata->dst_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -525,6 +553,7 @@ int test_hw(struct test_options *opts, char *model)
 	void *(*func)(void *);
 	size_t tbuf_sz;
 	void *tbuf = NULL;
+	ssize_t file_sz = 0;
 
 	if (!opts || !model) {
 		ret = -EINVAL;
@@ -600,6 +629,11 @@ int test_hw(struct test_options *opts, char *model)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out_cfg;
+	info.out_buf = malloc(info.out_size);
+	if (!info.out_buf) {
+		ret = -ENOMEM;
+		goto out_dst;
+	}
 	if (ifl_flag) {
 		tbuf_sz = opts->total_len;
 		tbuf = malloc(tbuf_sz);
@@ -637,6 +671,17 @@ int test_hw(struct test_options *opts, char *model)
 		goto out_poll;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
+	if (opts->is_file && opts->fd_out) {
+		/* write output from thread 0 to file */
+		file_sz = write(opts->fd_out, info.out_buf, info.out_size);
+		if (file_sz < info.out_size) {
+			printf("Expect to write %ld bytes. "
+			       "But only write %ld bytes!\n",
+			       info.out_size, file_sz);
+			return -EIO;
+		}
+	}
+
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
 	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
 	speed = ilen * 1000 * 1000 / 1024 / 1024 / usec;
@@ -652,11 +697,13 @@ int test_hw(struct test_options *opts, char *model)
 	}
 	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       zbuf, speed, usec, opts->block_size);
+	free(info.out_buf);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
 out_poll:
 	free_threads(&info);
+	free(info.out_buf);
 out_send:
 out_dfl:
 	free(info.in_buf);
@@ -664,6 +711,8 @@ out_src:
 	if (ifl_flag && tbuf)
 		free(tbuf);
 out_buf:
+	free(info.out_buf);
+out_dst:
 	uninit_config(&info, sched);
 out_cfg:
 	wd_free_list_accels(info.list);
@@ -897,4 +946,52 @@ int run_self_test(void)
 	if (!f_ret)
 		printf("Run self test successfully!\n");
 	return f_ret;
+}
+
+static int set_default_opts(struct test_options *opts)
+{
+	struct stat statbuf;
+	int ret;
+
+	if (!opts->block_size)
+		opts->block_size = 8192;
+	if (opts->is_file) {
+		ret = fstat(opts->fd_in, &statbuf);
+		if (!ret)
+			opts->total_len = statbuf.st_size;
+	}
+	if (!opts->total_len) {
+		if (opts->block_size)
+			opts->total_len = opts->block_size * 10;
+		else
+			opts->total_len = 8192 * 10;
+	}
+	if (!opts->thread_num)
+		opts->thread_num = 1;
+	if (!opts->q_num)
+		opts->q_num = opts->thread_num;
+	if (!opts->compact_run_num)
+		opts->compact_run_num = 1;
+	if (!opts->poll_num)
+		opts->poll_num = 1;
+	return 0;
+}
+
+int run_cmd(struct test_options *opts)
+{
+	int ret;
+
+	set_default_opts(opts);
+	if (opts->op_type == WD_DIR_COMPRESS) {
+		if (opts->verify)
+			ret = test_hw(opts, "hw_dfl_sw_ifl");
+		else
+			ret = test_hw(opts, "hw_dfl_perf");
+	} else {
+		if (opts->verify)
+			ret = test_hw(opts, "sw_dfl_hw_ifl");
+		else
+			ret = test_hw(opts, "hw_ifl_perf");
+	}
+	return ret;
 }
