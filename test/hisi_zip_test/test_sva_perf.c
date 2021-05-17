@@ -767,6 +767,7 @@ int main(int argc, char **argv)
 
 	opts.fd_in = -1;
 	opts.fd_out = -1;
+	opts.alg_type = WD_COMP_ALG_MAX;
 	while ((opt = getopt_long(argc, argv, COMMON_OPTSTRING "f:o:w:k:r:",
 				  long_options, &option_idx)) != -1) {
 		switch (opt) {

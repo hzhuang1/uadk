@@ -974,6 +974,8 @@ static int set_default_opts(struct test_options *opts)
 		opts->compact_run_num = 1;
 	if (!opts->poll_num)
 		opts->poll_num = 1;
+	if (opts->alg_type == WD_COMP_ALG_MAX)
+		opts->alg_type = WD_GZIP;
 	return 0;
 }
 
