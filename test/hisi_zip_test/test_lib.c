@@ -264,7 +264,8 @@ out:
  * sw_deflate() is only used in block mode. It produces a list of compressed
  * chunk data.
  */
-int sw_deflate(void *in, void *out, size_t in_sz, struct test_options *opts)
+int sw_deflate(void *in, void *out, size_t in_sz, size_t *out_sz,
+	       struct test_options *opts)
 {
 	off_t off;
 	int ret = 0;
@@ -276,6 +277,7 @@ int sw_deflate(void *in, void *out, size_t in_sz, struct test_options *opts)
 		in += opts->block_size;
 		out += opts->block_size * EXPANSION_RATIO;
 	}
+	*out_sz = in_sz * EXPANSION_RATIO;
 	return ret;
 }
 
@@ -284,12 +286,13 @@ int sw_deflate(void *in, void *out, size_t in_sz, struct test_options *opts)
  * in IN buffer.
  * in_size is EXPANSION_RATIO times of out_sz.
  */
-int sw_inflate(void *in, void *out, size_t in_sz, struct test_options *opts)
+int sw_inflate(void *in, void *out, size_t in_sz, size_t *out_sz,
+	       struct test_options *opts)
 {
-	size_t sum = 0, out_sz;
+	size_t sum = 0;
 	int ret;
 
-	out_sz = in_sz / EXPANSION_RATIO;
+	*out_sz = in_sz / EXPANSION_RATIO;
 	do {
 		ret = chunk_inflate(in, out, opts);
 		if (ret)
@@ -297,12 +300,12 @@ int sw_inflate(void *in, void *out, size_t in_sz, struct test_options *opts)
 		in += opts->block_size * EXPANSION_RATIO;
 		out += opts->block_size;
 		sum += opts->block_size;
-	} while (!ret && (sum < out_sz));
+	} while (!ret && (sum < *out_sz));
 	return 0;
 }
 
 int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	       struct test_options *opts, sem_t *sem)
+	       size_t *out_sz, struct test_options *opts, sem_t *sem)
 {
 	struct wd_comp_req req = {0};
 	off_t off;
@@ -338,17 +341,18 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 		req.dst += opts->block_size * EXPANSION_RATIO;
 		req.dst_len = opts->block_size * EXPANSION_RATIO;
 	}
+	*out_sz = in_sz * EXPANSION_RATIO;
 	return 0;
 }
 
 int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	       struct test_options *opts, sem_t *sem)
+	       size_t *out_sz, struct test_options *opts, sem_t *sem)
 {
 	struct wd_comp_req req = {0};
-	size_t sum = 0, out_sz, chunk_sz;
+	size_t sum = 0, chunk_sz;
 	int ret;
 
-	out_sz = in_sz / EXPANSION_RATIO;
+	*out_sz = in_sz / EXPANSION_RATIO;
 	chunk_sz = opts->block_size;
 	req.src = in;
 	req.src_len = chunk_sz * EXPANSION_RATIO;
@@ -380,13 +384,13 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 		req.dst += chunk_sz;
 		req.dst_len = chunk_sz;
 		sum += chunk_sz;
-	} while (!ret && (sum < out_sz));
+	} while (!ret && (sum < *out_sz));
 	return 0;
 }
 
 /* used in BATCH mode */
 int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata)
+	        size_t *out_sz, thread_data_t *tdata)
 {
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
@@ -450,20 +454,21 @@ int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 		req.dst += opts->block_size * EXPANSION_RATIO;
 		req.dst_len = opts->block_size * EXPANSION_RATIO;
 	}
+	*out_sz = in_sz * EXPANSION_RATIO;
 	return 0;
 }
 
 /* used in BATCH mode */
 int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata)
+	        size_t *out_sz, thread_data_t *tdata)
 {
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
 	struct wd_comp_req req = {0};
-	size_t sum = 0, out_sz, chunk_sz;
+	size_t sum = 0, chunk_sz;
 	int ret = 0, bcnt = 0;
 
-	out_sz = in_sz / EXPANSION_RATIO;
+	*out_sz = in_sz / EXPANSION_RATIO;
 	chunk_sz = opts->block_size;
 	req.src = in;
 	req.src_len = chunk_sz * EXPANSION_RATIO;
@@ -490,7 +495,7 @@ int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 					/* See comments in hw_deflate2(). */
 					if (bcnt == opts->batch_num)
 						sem_wait(&tdata->sem);
-					else if ((sum + chunk_sz) >= out_sz) {
+					else if ((sum + chunk_sz) >= *out_sz) {
 						__atomic_store_n(
 							&tdata->flush_bcnt,
 							bcnt,
@@ -508,13 +513,13 @@ int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
 		req.dst += chunk_sz;
 		req.dst_len = chunk_sz;
 		sum += chunk_sz;
-	} while (!ret && (sum < out_sz));
+	} while (!ret && (sum < *out_sz));
 	return 0;
 }
 
 /* used in BATCH mode */
 int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata)
+	        size_t *out_sz, thread_data_t *tdata)
 {
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
@@ -591,20 +596,21 @@ int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
 			req.dst_len = bsize * EXPANSION_RATIO;
 		}
 	}
+	*out_sz = in_sz * EXPANSION_RATIO;
 	return 0;
 }
 
 /* used in BATCH mode */
 int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata)
+	        size_t *out_sz, thread_data_t *tdata)
 {
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
 	struct wd_comp_req req = {0};
-	size_t sum = 0, out_sz, chunk_sz;
+	size_t sum = 0, chunk_sz;
 	int ret = 0, flag;
 
-	out_sz = in_sz / EXPANSION_RATIO;
+	*out_sz = in_sz / EXPANSION_RATIO;
 	chunk_sz = opts->block_size;
 	req.src = in;
 	req.src_len = chunk_sz * EXPANSION_RATIO;
@@ -641,14 +647,14 @@ int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
 				req.dst_len = chunk_sz;
 				sum += chunk_sz;
 				if ((tdata->bcnt == opts->batch_num) ||
-				    (sum >= out_sz)) {
+				    (sum >= *out_sz)) {
 					__atomic_store_n(&tdata->batch_flag, 1,
 							 __ATOMIC_RELEASE);
 					break;
 				}
 			}
 			pthread_spin_unlock(&lock);
-		} while (!ret && (sum < out_sz));
+		} while (!ret && (sum < *out_sz));
 	} else {
 		do {
 			do {
@@ -661,7 +667,7 @@ int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
 			req.dst += chunk_sz;
 			req.dst_len = chunk_sz;
 			sum += chunk_sz;
-		} while (!ret && (sum < out_sz));
+		} while (!ret && (sum < *out_sz));
 	}
 	return 0;
 }

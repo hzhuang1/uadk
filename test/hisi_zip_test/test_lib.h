@@ -205,20 +205,22 @@ void *mmap_alloc(size_t len);
 int lib_poll_func(__u32 pos, __u32 expect, __u32 *count);
 typedef int (*check_output_fn)(unsigned char *buf, unsigned int size, void *opaque);
 
-int sw_deflate(void *in, void *out, size_t in_sz, struct test_options *opts);
-int sw_inflate(void *in, void *out, size_t in_sz, struct test_options *opts);
+int sw_deflate(void *in, void *out, size_t in_sz, size_t *out_sz,
+	       struct test_options *opts);
+int sw_inflate(void *in, void *out, size_t in_sz, size_t *out_sz,
+	       struct test_options *opts);
 int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	       struct test_options *opts, sem_t *sem);
+	       size_t *out_sz, struct test_options *opts, sem_t *sem);
 int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	       struct test_options *opts, sem_t *sem);
+	       size_t *out_sz, struct test_options *opts, sem_t *sem);
 int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata);
+	        size_t *out_sz, thread_data_t *tdata);
 int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata);
+	        size_t *out_sz, thread_data_t *tdata);
 int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata);
+	        size_t *out_sz, thread_data_t *tdata);
 int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	        thread_data_t *tdata);
+	        size_t *out_sz, thread_data_t *tdata);
 
 /* for block interface */
 int hw_blk_compress(int alg_type, int blksize, __u8 data_fmt, void *priv,

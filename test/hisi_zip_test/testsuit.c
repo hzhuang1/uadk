@@ -8,7 +8,7 @@ static void *sw_dfl_sw_ifl(void *arg)
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
 	void *tbuf;
-	size_t tbuf_sz;
+	size_t tbuf_sz, out_sz = 0;
 	comp_md5_t final_md5;
 	int i, ret;
 
@@ -18,12 +18,13 @@ static void *sw_dfl_sw_ifl(void *arg)
 		return (void *)(uintptr_t)(-ENOMEM);
 
 	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
+		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz,
+				 &out_sz, opts);
 		if (ret) {
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out;
 		}
-		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
+		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, &out_sz, opts);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
 			goto out;
@@ -63,7 +64,7 @@ static void *sw_dfl_hw_ifl(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_ifl;
 	void *tbuf;
-	size_t tbuf_sz;
+	size_t tbuf_sz, out_sz = 0;
 	comp_md5_t final_md5;
 	int i, ret;
 	struct timeval start_tvl, end_tvl;
@@ -85,12 +86,13 @@ static void *sw_dfl_hw_ifl(void *arg)
 
 	gettimeofday(&start_tvl, NULL);
 	for (i = 0; i < opts->compact_run_num; i++) {
-		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, opts);
+		ret = sw_deflate(tdata->src, tbuf, tdata->src_sz, &out_sz,
+				 opts);
 		if (ret) {
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out_run;
 		}
-		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz,
+		ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz, &out_sz,
 				 opts, &tdata->sem);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
@@ -116,7 +118,7 @@ static void *sw_dfl_hw_ifl(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -142,7 +144,7 @@ static void *hw_dfl_sw_ifl(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_dfl;
 	void *tbuf;
-	size_t tbuf_sz;
+	size_t tbuf_sz, out_sz = 0, tmp_sz = 0;
 	comp_md5_t final_md5;
 	int i, ret;
 
@@ -163,12 +165,12 @@ static void *hw_dfl_sw_ifl(void *arg)
 
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
-				 opts, &tdata->sem);
+				 &out_sz, opts, &tdata->sem);
 		if (ret) {
 			printf("Fail to deflate by zlib: %d\n", ret);
 			goto out_run;
 		}
-		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, opts);
+		ret = sw_inflate(tbuf, tdata->dst, tbuf_sz, &tmp_sz, opts);
 		if (ret) {
 			printf("Fail to inflate by zlib: %d\n", ret);
 			goto out_run;
@@ -191,7 +193,7 @@ static void *hw_dfl_sw_ifl(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -217,7 +219,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_dfl, h_ifl;
 	void *tbuf;
-	size_t tbuf_sz;
+	size_t tbuf_sz, out_sz = 0;
 	comp_md5_t final_md5;
 	int i, ret;
 	__u32 tmp_sz, tout_sz;
@@ -266,13 +268,13 @@ static void *hw_dfl_hw_ifl(void *arg)
 			}
 		} else {
 			ret = hw_deflate(h_dfl, tdata->src, tbuf, tdata->src_sz,
-					 opts, &tdata->sem);
+					 &out_sz, opts, &tdata->sem);
 			if (ret) {
 				printf("Fail to deflate by zlib: %d\n", ret);
 				goto out_run;
 			}
 			ret = hw_inflate(h_ifl, tbuf, tdata->dst, tbuf_sz,
-					 opts, &tdata->sem);
+					 &out_sz, opts, &tdata->sem);
 			if (ret) {
 				printf("Fail to inflate by zlib: %d\n", ret);
 				goto out_run;
@@ -298,7 +300,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -326,6 +328,7 @@ static void *hw_dfl_perf(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_dfl;
 	int i, ret;
+	size_t out_sz = 0;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -337,7 +340,7 @@ static void *hw_dfl_perf(void *arg)
 
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_deflate(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
-				 opts, &tdata->sem);
+				 &out_sz, opts, &tdata->sem);
 		if (ret)
 			goto out;
 	}
@@ -346,7 +349,7 @@ static void *hw_dfl_perf(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -370,6 +373,7 @@ static void *hw_ifl_perf(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_ifl;
 	int i, ret;
+	size_t out_sz = 0;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -381,7 +385,7 @@ static void *hw_ifl_perf(void *arg)
 
 	for (i = 0; i < opts->compact_run_num; i++) {
 		ret = hw_inflate(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
-				 opts, &tdata->sem);
+				 &out_sz, opts, &tdata->sem);
 		if (ret)
 			goto out;
 	}
@@ -390,7 +394,7 @@ static void *hw_ifl_perf(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -415,6 +419,7 @@ static void *hw_dfl_perf2(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_dfl;
 	int i, ret;
+	size_t out_sz = 0;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -427,7 +432,7 @@ static void *hw_dfl_perf2(void *arg)
 	for (i = 0; i < opts->compact_run_num; i++) {
 		/* hw_deflate2() equals to hw_deflate3() */
 		ret = hw_deflate3(h_dfl, tdata->src, tdata->dst, tdata->src_sz,
-				  tdata);
+				  &out_sz, tdata);
 		if (ret)
 			goto out;
 	}
@@ -436,7 +441,7 @@ static void *hw_dfl_perf2(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -461,6 +466,7 @@ static void *hw_ifl_perf2(void *arg)
 	struct wd_comp_sess_setup setup = {0};
 	handle_t h_ifl;
 	int i, ret;
+	size_t out_sz = 0;
 
         setup.alg_type = opts->alg_type;
         setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
@@ -473,7 +479,7 @@ static void *hw_ifl_perf2(void *arg)
 	for (i = 0; i < opts->compact_run_num; i++) {
 		/* hw_inflate2() equals to hw_inflate3() */
 		ret = hw_inflate3(h_ifl, tdata->src, tdata->dst, tdata->src_sz,
-				  tdata);
+				  &out_sz, tdata);
 		if (ret)
 			goto out;
 	}
@@ -482,7 +488,7 @@ static void *hw_ifl_perf2(void *arg)
 	if (tdata->tid)
 		free(tdata->dst);
 	else
-		info->out_size = tdata->dst_sz;
+		info->out_size = out_sz;
 	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 	if (!ret)
 		free(tdata->src);
@@ -551,9 +557,10 @@ int test_hw(struct test_options *opts, char *model)
 	char zbuf[120];
 	int ret, zbuf_idx, ifl_flag = 0;
 	void *(*func)(void *);
-	size_t tbuf_sz;
+	size_t tbuf_sz, out_sz = 0;
 	void *tbuf = NULL;
 	ssize_t file_sz = 0;
+	struct stat statbuf;
 
 	if (!opts || !model) {
 		ret = -EINVAL;
@@ -629,34 +636,44 @@ int test_hw(struct test_options *opts, char *model)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out_cfg;
+	info.in_buf = malloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
 	info.out_buf = malloc(info.out_size);
 	if (!info.out_buf) {
 		ret = -ENOMEM;
 		goto out_dst;
 	}
-	if (ifl_flag) {
-		tbuf_sz = opts->total_len;
-		tbuf = malloc(tbuf_sz);
-		if (!tbuf) {
-			ret = -ENOMEM;
+	if (opts->is_file) {
+		ret = fstat(opts->fd_in, &statbuf);
+		if (!ret) {
+			opts->total_len = statbuf.st_size;
+			info.in_size = opts->total_len;
+		}
+		file_sz = read(opts->fd_in, info.in_buf, info.in_size);
+		if (file_sz < info.in_size) {
+			printf("Expect to read %ld bytes. "
+			       "But only read %ld bytes!\n",
+			       info.in_size, file_sz);
 			goto out_buf;
 		}
-		gen_random_data(tbuf, tbuf_sz);
-		info.in_buf = malloc(info.in_size);
-		if (!info.in_buf) {
-			ret = -ENOMEM;
-			goto out_src;
-		}
-		ret = sw_deflate(tbuf, info.in_buf, tbuf_sz, opts);
-		if (ret)
-			goto out_dfl;
 	} else {
-		info.in_buf = malloc(info.in_size);
-		if (!info.in_buf) {
-			ret = -ENOMEM;
-			goto out_src;
-		}
-		gen_random_data(info.in_buf, info.in_size);
+		if (ifl_flag) {
+			tbuf_sz = opts->total_len;
+			tbuf = malloc(tbuf_sz);
+			if (!tbuf) {
+				ret = -ENOMEM;
+				goto out_buf;
+			}
+			gen_random_data(tbuf, tbuf_sz);
+			ret = sw_deflate(tbuf, info.in_buf, tbuf_sz,
+					 &out_sz, opts);
+			if (ret)
+				goto out_dfl;
+		} else
+			gen_random_data(info.in_buf, info.in_size);
 	}
 	ret = create_send2_threads(opts, &info, func);
 	if (ret)
@@ -678,7 +695,7 @@ int test_hw(struct test_options *opts, char *model)
 			printf("Expect to write %ld bytes. "
 			       "But only write %ld bytes!\n",
 			       info.out_size, file_sz);
-			return -EIO;
+			goto out_poll;
 		}
 	}
 
@@ -706,13 +723,13 @@ out_poll:
 	free(info.out_buf);
 out_send:
 out_dfl:
-	free(info.in_buf);
-out_src:
 	if (ifl_flag && tbuf)
 		free(tbuf);
 out_buf:
 	free(info.out_buf);
 out_dst:
+	free(info.in_buf);
+out_src:
 	uninit_config(&info, sched);
 out_cfg:
 	wd_free_list_accels(info.list);
@@ -950,16 +967,8 @@ int run_self_test(void)
 
 static int set_default_opts(struct test_options *opts)
 {
-	struct stat statbuf;
-	int ret;
-
 	if (!opts->block_size)
 		opts->block_size = 8192;
-	if (opts->is_file) {
-		ret = fstat(opts->fd_in, &statbuf);
-		if (!ret)
-			opts->total_len = statbuf.st_size;
-	}
 	if (!opts->total_len) {
 		if (opts->block_size)
 			opts->total_len = opts->block_size * 10;
