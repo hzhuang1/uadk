@@ -308,6 +308,7 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	       size_t *out_sz, struct test_options *opts, sem_t *sem)
 {
 	struct wd_comp_req req = {0};
+	size_t consume_sz = 0;
 	off_t off;
 	int ret = 0;
 
@@ -322,6 +323,8 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	}
 
 	for (off = 0; off < in_sz; off += opts->block_size) {
+		if (consume_sz + req.src_len > in_sz)
+			req.src_len = in_sz % req.src_len;
 		do {
 			if (opts->sync_mode) {
 				ret = wd_do_comp_async(h_dfl, &req);
@@ -334,6 +337,7 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 			} else
 				ret = wd_do_comp_sync(h_dfl, &req);
 		} while (ret == -WD_EBUSY);
+		consume_sz += req.src_len;
 		if (ret)
 			return ret;
 		req.src += opts->block_size;
@@ -349,7 +353,7 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	       size_t *out_sz, struct test_options *opts, sem_t *sem)
 {
 	struct wd_comp_req req = {0};
-	size_t sum = 0, chunk_sz;
+	size_t sum = 0, chunk_sz, consume_sz = 0;
 	int ret;
 
 	*out_sz = in_sz / EXPANSION_RATIO;
@@ -365,6 +369,8 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	}
 
 	do {
+		if (consume_sz + req.src_len > in_sz)
+			req.src_len = in_sz % req.src_len;
 		do {
 			if (opts->sync_mode) {
 				ret = wd_do_comp_async(h_ifl, &req);
@@ -379,6 +385,7 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 		} while (ret == -WD_EBUSY);
 		if (ret)
 			return ret;
+		consume_sz += req.src_len;
 		req.src += chunk_sz * EXPANSION_RATIO;
 		req.src_len = chunk_sz * EXPANSION_RATIO;
 		req.dst += chunk_sz;
