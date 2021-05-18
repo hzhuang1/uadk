@@ -13,7 +13,7 @@ static void *sw_dfl_sw_ifl(void *arg)
 	int i, ret;
 
 	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
+	tbuf = mmap_alloc(tbuf_sz);
 	if (!tbuf)
 		return (void *)(uintptr_t)(-ENOMEM);
 
@@ -41,18 +41,14 @@ static void *sw_dfl_sw_ifl(void *arg)
 			goto out;
 		}
 	}
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	munmap(tbuf, tbuf_sz);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 	return NULL;
 out:
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	munmap(tbuf, tbuf_sz);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 	return (void *)(uintptr_t)(ret);
 }
 
@@ -78,7 +74,7 @@ static void *sw_dfl_hw_ifl(void *arg)
 		return (void *)(uintptr_t)(-EINVAL);
 
 	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
+	tbuf = mmap_alloc(tbuf_sz);
 	if (!tbuf) {
 		ret = -ENOMEM;
 		goto out;
@@ -113,25 +109,20 @@ static void *sw_dfl_hw_ifl(void *arg)
 	gettimeofday(&end_tvl, NULL);
 	wd_comp_free_sess(h_ifl);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
-	free(tbuf);
+	munmap(tbuf, tbuf_sz);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_ifl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	munmap(tbuf, tbuf_sz);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 out:
 	return (void *)(uintptr_t)(ret);
 }
@@ -157,7 +148,7 @@ static void *hw_dfl_sw_ifl(void *arg)
 		return (void *)(uintptr_t)(-EINVAL);
 
 	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
+	tbuf = mmap_alloc(tbuf_sz);
 	if (!tbuf) {
 		ret = -ENOMEM;
 		goto out;
@@ -188,25 +179,20 @@ static void *hw_dfl_sw_ifl(void *arg)
 		}
 	}
 	wd_comp_free_sess(h_dfl);
-	free(tbuf);
+	munmap(tbuf, tbuf_sz);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_dfl);
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	munmap(tbuf, tbuf_sz);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 out:
 	return (void *)(uintptr_t)(ret);
 }
@@ -240,7 +226,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 	}
 
 	tbuf_sz = tdata->src_sz * EXPANSION_RATIO;
-	tbuf = malloc(tbuf_sz);
+	tbuf = mmap_alloc(tbuf_sz);
 	if (!tbuf) {
 		ret = -ENOMEM;
 		goto out_buf;
@@ -295,24 +281,19 @@ static void *hw_dfl_hw_ifl(void *arg)
 	}
 	wd_comp_free_sess(h_dfl);
 	wd_comp_free_sess(h_ifl);
-	free(tbuf);
+	munmap(tbuf, tbuf_sz);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
-	free(tbuf);
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	munmap(tbuf, tbuf_sz);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 out_buf:
 	wd_comp_free_sess(h_ifl);
 out:
@@ -347,20 +328,15 @@ static void *hw_dfl_perf(void *arg)
 	wd_comp_free_sess(h_dfl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_dfl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -392,20 +368,15 @@ static void *hw_ifl_perf(void *arg)
 	wd_comp_free_sess(h_ifl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_ifl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -439,20 +410,15 @@ static void *hw_dfl_perf2(void *arg)
 	wd_comp_free_sess(h_dfl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_dfl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -486,20 +452,15 @@ static void *hw_ifl_perf2(void *arg)
 	wd_comp_free_sess(h_ifl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		free(tdata->dst);
+		munmap(tdata->dst, tdata->dst_sz);
 	else
-		info->out_size = out_sz;
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out:
-	free(tdata->dst);
-	ret = __atomic_sub_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
-	if (!ret)
-		free(tdata->src);
+	if (tdata->tid)
+		munmap(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_ifl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -557,9 +518,9 @@ int test_hw(struct test_options *opts, char *model)
 	char zbuf[120];
 	int ret, zbuf_idx, ifl_flag = 0;
 	void *(*func)(void *);
-	size_t tbuf_sz, out_sz = 0;
+	size_t tbuf_sz = 0, out_sz = 0;
 	void *tbuf = NULL;
-	ssize_t file_sz = 0;
+	ssize_t file_sz;
 	struct stat statbuf;
 
 	if (!opts || !model) {
@@ -636,22 +597,31 @@ int test_hw(struct test_options *opts, char *model)
 	ret = init_ctx_config(opts, &info, &sched);
 	if (ret)
 		goto out_cfg;
-	info.in_buf = malloc(info.in_size);
-	if (!info.in_buf) {
-		ret = -ENOMEM;
-		goto out_src;
-	}
-	info.out_buf = malloc(info.out_size);
-	if (!info.out_buf) {
-		ret = -ENOMEM;
-		goto out_dst;
-	}
 	if (opts->is_file) {
 		ret = fstat(opts->fd_in, &statbuf);
 		if (!ret) {
 			opts->total_len = statbuf.st_size;
 			info.in_size = opts->total_len;
+			if (ifl_flag) {
+				info.out_size = opts->total_len /
+						EXPANSION_RATIO;
+			} else {
+				info.out_size = opts->total_len *
+						EXPANSION_RATIO;
+			}
 		}
+	}
+	info.in_buf = mmap_alloc(info.in_size);
+	if (!info.in_buf) {
+		ret = -ENOMEM;
+		goto out_src;
+	}
+	info.out_buf = mmap_alloc(info.out_size);
+	if (!info.out_buf) {
+		ret = -ENOMEM;
+		goto out_dst;
+	}
+	if (opts->is_file) {
 		file_sz = read(opts->fd_in, info.in_buf, info.in_size);
 		if (file_sz < info.in_size) {
 			printf("Expect to read %ld bytes. "
@@ -662,7 +632,7 @@ int test_hw(struct test_options *opts, char *model)
 	} else {
 		if (ifl_flag) {
 			tbuf_sz = opts->total_len;
-			tbuf = malloc(tbuf_sz);
+			tbuf = mmap_alloc(tbuf_sz);
 			if (!tbuf) {
 				ret = -ENOMEM;
 				goto out_buf;
@@ -672,6 +642,7 @@ int test_hw(struct test_options *opts, char *model)
 					 &out_sz, opts);
 			if (ret)
 				goto out_dfl;
+			munmap(tbuf, tbuf_sz);
 		} else
 			gen_random_data(info.in_buf, info.in_size);
 	}
@@ -690,7 +661,7 @@ int test_hw(struct test_options *opts, char *model)
 	timersub(&end_tvl, &start_tvl, &start_tvl);
 	if (opts->is_file && opts->fd_out) {
 		/* write output from thread 0 to file */
-		file_sz = write(opts->fd_out, info.out_buf, info.out_size);
+		file_sz = write(opts->fd_out, info.out_buf, info.total_out);
 		if (file_sz < info.out_size) {
 			printf("Expect to write %ld bytes. "
 			       "But only write %ld bytes!\n",
@@ -714,21 +685,21 @@ int test_hw(struct test_options *opts, char *model)
 	}
 	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       zbuf, speed, usec, opts->block_size);
-	free(info.out_buf);
+	munmap(info.out_buf, info.out_size);
+	munmap(info.in_buf, info.in_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
 out_poll:
 	free_threads(&info);
-	free(info.out_buf);
 out_send:
 out_dfl:
-	if (ifl_flag && tbuf)
-		free(tbuf);
+	if (ifl_flag && tbuf && tbuf_sz)
+		munmap(tbuf, tbuf_sz);
 out_buf:
-	free(info.out_buf);
+	munmap(info.out_buf, info.out_size);
 out_dst:
-	free(info.in_buf);
+	munmap(info.in_buf, info.in_size);
 out_src:
 	uninit_config(&info, sched);
 out_cfg:

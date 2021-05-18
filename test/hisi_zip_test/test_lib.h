@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -131,8 +132,6 @@ struct hizip_test_info {
 	struct test_options *opts;
 	char *in_buf, *out_buf;
 	size_t in_size, out_size;
-	/* reference count if the address is shared among threads */
-	int in_share, out_share;
 	size_t total_out;
 	struct uacce_dev_list *list;
 	handle_t h_sess;

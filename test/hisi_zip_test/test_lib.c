@@ -1314,13 +1314,12 @@ int create_send2_threads(struct test_options *opts,
 	}
 	for (i = 0; i < num; i++) {
 		/* src address is shared among threads */
-		__atomic_add_fetch(&info->in_share, 1, __ATOMIC_SEQ_CST);
 		tdatas[i].tid = i;
 		tdatas[i].src_sz = info->in_size;
 		tdatas[i].src = info->in_buf;
 		tdatas[i].dst_sz = info->out_size;
 		if (i) {
-			tdatas[i].dst = malloc(tdatas[i].dst_sz);
+			tdatas[i].dst = mmap_alloc(tdatas[i].dst_sz);
 			if (!tdatas[i].dst) {
 				ret = -ENOMEM;
 				goto out_dst;
@@ -1350,7 +1349,7 @@ out_thd:
 		pthread_cancel(info->send_tds[j]);
 out_dst:
 	for (j = 0; j < i; j++)
-		free(tdatas[j].dst);
+		munmap(tdatas[j].dst, tdatas[j].dst_sz);
 	free(tdatas);
 out:
 	free(info->send_tds);
