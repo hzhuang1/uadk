@@ -41,14 +41,14 @@ static void *sw_dfl_sw_ifl(void *arg)
 			goto out;
 		}
 	}
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	return NULL;
 out:
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	return (void *)(uintptr_t)(ret);
 }
 
@@ -109,10 +109,10 @@ static void *sw_dfl_hw_ifl(void *arg)
 	gettimeofday(&end_tvl, NULL);
 	wd_comp_free_sess(h_ifl);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
@@ -120,9 +120,9 @@ static void *sw_dfl_hw_ifl(void *arg)
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_ifl);
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 out:
 	return (void *)(uintptr_t)(ret);
 }
@@ -179,10 +179,10 @@ static void *hw_dfl_sw_ifl(void *arg)
 		}
 	}
 	wd_comp_free_sess(h_dfl);
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
@@ -190,9 +190,9 @@ static void *hw_dfl_sw_ifl(void *arg)
 	return NULL;
 out_run:
 	wd_comp_free_sess(h_dfl);
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 out:
 	return (void *)(uintptr_t)(ret);
 }
@@ -281,19 +281,19 @@ static void *hw_dfl_hw_ifl(void *arg)
 	}
 	wd_comp_free_sess(h_dfl);
 	wd_comp_free_sess(h_ifl);
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
 out_run:
-	munmap(tbuf, tbuf_sz);
+	mmap_free(tbuf, tbuf_sz);
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 out_buf:
 	wd_comp_free_sess(h_ifl);
 out:
@@ -328,7 +328,7 @@ static void *hw_dfl_perf(void *arg)
 	wd_comp_free_sess(h_dfl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
@@ -336,7 +336,7 @@ static void *hw_dfl_perf(void *arg)
 	return NULL;
 out:
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_dfl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -368,7 +368,7 @@ static void *hw_ifl_perf(void *arg)
 	wd_comp_free_sess(h_ifl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
@@ -376,7 +376,7 @@ static void *hw_ifl_perf(void *arg)
 	return NULL;
 out:
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_ifl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -410,7 +410,7 @@ static void *hw_dfl_perf2(void *arg)
 	wd_comp_free_sess(h_dfl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
@@ -418,7 +418,7 @@ static void *hw_dfl_perf2(void *arg)
 	return NULL;
 out:
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_dfl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -452,7 +452,7 @@ static void *hw_ifl_perf2(void *arg)
 	wd_comp_free_sess(h_ifl);
 	/* Thread 0 shares output buf with info->out_buf. */
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	else
 		info->total_out = out_sz;
 	/* mark sending thread to end */
@@ -460,7 +460,7 @@ static void *hw_ifl_perf2(void *arg)
 	return NULL;
 out:
 	if (tdata->tid)
-		munmap(tdata->dst, tdata->dst_sz);
+		mmap_free(tdata->dst, tdata->dst_sz);
 	wd_comp_free_sess(h_ifl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -642,7 +642,7 @@ int test_hw(struct test_options *opts, char *model)
 					 &out_sz, opts);
 			if (ret)
 				goto out_dfl;
-			munmap(tbuf, tbuf_sz);
+			mmap_free(tbuf, tbuf_sz);
 		} else
 			gen_random_data(info.in_buf, info.in_size);
 	}
@@ -685,8 +685,8 @@ int test_hw(struct test_options *opts, char *model)
 	}
 	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       zbuf, speed, usec, opts->block_size);
-	munmap(info.out_buf, info.out_size);
-	munmap(info.in_buf, info.in_size);
+	mmap_free(info.out_buf, info.out_size);
+	mmap_free(info.in_buf, info.in_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	return 0;
@@ -695,11 +695,11 @@ out_poll:
 out_send:
 out_dfl:
 	if (ifl_flag && tbuf && tbuf_sz)
-		munmap(tbuf, tbuf_sz);
+		mmap_free(tbuf, tbuf_sz);
 out_buf:
-	munmap(info.out_buf, info.out_size);
+	mmap_free(info.out_buf, info.out_size);
 out_dst:
-	munmap(info.in_buf, info.in_size);
+	mmap_free(info.in_buf, info.in_size);
 out_src:
 	uninit_config(&info, sched);
 out_cfg:

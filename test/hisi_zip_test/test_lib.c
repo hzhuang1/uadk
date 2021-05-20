@@ -45,10 +45,8 @@ void *mmap_alloc(size_t len)
 	void *p;
 	long page_size = sysconf(_SC_PAGESIZE);
 
-	if (len % page_size) {
-		WD_ERR("unaligned allocation must use malloc\n");
-		return NULL;
-	}
+	if (len % page_size)
+		return malloc(len);
 
 	p = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
 		 -1, 0);
@@ -56,6 +54,18 @@ void *mmap_alloc(size_t len)
 		WD_ERR("Failed to allocate %zu bytes\n", len);
 
 	return p == MAP_FAILED ? NULL : p;
+}
+
+int mmap_free(void *addr, size_t len)
+{
+	long page_size = sysconf(_SC_PAGESIZE);
+
+	if (len % page_size) {
+		free(addr);
+		return 0;
+	}
+
+	return munmap(addr, len);
 }
 
 void gen_random_data(void *buf, size_t len)
@@ -1349,7 +1359,7 @@ out_thd:
 		pthread_cancel(info->send_tds[j]);
 out_dst:
 	for (j = 0; j < i; j++)
-		munmap(tdatas[j].dst, tdatas[j].dst_sz);
+		mmap_free(tdatas[j].dst, tdatas[j].dst_sz);
 	free(tdatas);
 out:
 	free(info->send_tds);
