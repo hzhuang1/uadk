@@ -271,6 +271,112 @@ out:
 }
 
 /*
+ * Deflate a data block with compressed header.
+ */
+static int chunk_deflate2(void *in, size_t in_sz, void *out, size_t *out_sz,
+			  struct test_options *opts)
+{
+	int alg_type = opts->alg_type;
+	z_stream strm;
+	int windowBits;
+	int ret;
+
+	switch (alg_type) {
+	case WD_ZLIB:
+		windowBits = 15;
+		break;
+	case WD_DEFLATE:
+		windowBits = -15;
+		break;
+	case WD_GZIP:
+		windowBits = 15 + 16;
+		break;
+	default:
+		printf("algorithm %d unsupported by zlib\n", alg_type);
+		return -EINVAL;
+	}
+	memset(&strm, 0, sizeof(z_stream));
+	strm.next_in = in;
+	strm.avail_in = in_sz;
+	strm.next_out = out;
+	strm.avail_out = *out_sz;
+
+	ret = deflateInit2(&strm, Z_BEST_SPEED, Z_DEFLATED, windowBits,
+			   8, Z_DEFAULT_STRATEGY);
+	if (ret != Z_OK) {
+		printf("deflateInit2: %d\n", ret);
+		return -EINVAL;
+	}
+
+	do {
+		ret = deflate(&strm, Z_FINISH);
+		if ((ret == Z_STREAM_ERROR) || (ret == Z_BUF_ERROR)) {
+			printf("defalte error %d - %s\n", ret, strm.msg);
+			ret = -ENOSR;
+			break;
+		} else if (!strm.avail_in) {
+			if (ret != Z_STREAM_END)
+				printf("deflate unexpected return: %d\n", ret);
+			ret = 0;
+			break;
+		} else if (!strm.avail_out) {
+			printf("deflate out of memory\n");
+			ret = -ENOSPC;
+			break;
+		}
+	} while (ret == Z_OK);
+
+	deflateEnd(&strm);
+	*out_sz = *out_sz - strm.avail_out;
+	return ret;
+}
+
+
+/*
+ * This function is used in BLOCK mode. Each compressing in BLOCK mode
+ * produces compression header.
+ */
+static int chunk_inflate2(void *in, size_t in_sz, void *out, size_t *out_sz,
+			  struct test_options *opts)
+{
+	z_stream strm;
+	int ret;
+
+	memset(&strm, 0, sizeof(z_stream));
+	/* Window size of 15, +32 for auto-decoding gzip/zlib */
+	ret = inflateInit2(&strm, 15 + 32);
+	if (ret != Z_OK) {
+		printf("zlib inflateInit: %d\n", ret);
+		return -EINVAL;
+	}
+
+	strm.next_in = in;
+	strm.avail_in = in_sz;
+	strm.next_out = out;
+	strm.avail_out = *out_sz;
+	do {
+		ret = inflate(&strm, Z_NO_FLUSH);
+		if ((ret < 0) || (ret == Z_NEED_DICT)) {
+			printf("zlib error %d - %s\n", ret, strm.msg);
+			goto out;
+		}
+		if (!strm.avail_out) {
+			if (!strm.avail_in || (ret == Z_STREAM_END))
+				break;
+			printf("%s: avail_out is empty!\n", __func__);
+			goto out;
+		}
+	} while (strm.avail_in && (ret != Z_STREAM_END));
+	inflateEnd(&strm);
+	*out_sz = *out_sz - strm.avail_out;
+	return 0;
+out:
+	inflateEnd(&strm);
+	ret = -EINVAL;
+	return ret;
+}
+
+/*
  * sw_deflate() is only used in block mode. It produces a list of compressed
  * chunk data.
  */
@@ -314,13 +420,95 @@ int sw_inflate(void *in, void *out, size_t in_sz, size_t *out_sz,
 	return 0;
 }
 
+void init_chunk_list(chunk_list_t *list, void *buf, size_t buf_sz,
+		     size_t chunk_sz)
+{
+	chunk_list_t *p = NULL;
+	int i, count;
+	size_t sum;
+
+	count = (buf_sz + chunk_sz - 1) / chunk_sz;
+	for (i = 0, sum = 0, p = list; i < count && sum <= buf_sz; i++, p++) {
+		p->addr = buf + sum;
+		p->size = MIN(buf_sz - sum, chunk_sz);
+		if (i == count - 1)
+			p->next = NULL;
+		else
+			p->next = p + 1;
+		sum += p->size;
+	}
+}
+
+chunk_list_t *create_chunk_list(void *buf, size_t buf_sz, size_t chunk_sz)
+{
+	chunk_list_t *list;
+	int count;
+
+	count = (buf_sz + chunk_sz - 1) / chunk_sz;
+	if (count > HIZIP_CHUNK_LIST_ENTRIES)
+		return NULL;
+	if (buf_sz / chunk_sz < count)
+		return NULL;
+	/* allocate entries with additional one */
+	list = malloc(sizeof(chunk_list_t) * (count + 1));
+	if (!list)
+		return NULL;
+	init_chunk_list(list, buf, buf_sz, chunk_sz);
+	return list;
+}
+
+void free_chunk_list(chunk_list_t *list)
+{
+	free(list);
+}
+
+/*
+ * Compress a list of chunk data and produce a list of chunk data by software.
+ * in_list & out_list should be formated first.
+ */
+int sw_deflate2(chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts)
+{
+	chunk_list_t *p, *q;
+	int ret;
+
+	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
+		ret = chunk_deflate2(p->addr, p->size, q->addr, &q->size,
+				     opts);
+		if (ret)
+			return ret;
+	}
+	return ret;
+}
+
+/*
+ * Compress a list of chunk data and produce a list of chunk data by software.
+ * in_list & out_list should be formated first.
+ */
+int sw_inflate2(chunk_list_t *in_list, chunk_list_t *out_list,
+		struct test_options *opts)
+{
+	chunk_list_t *p, *q;
+	int ret;
+
+	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
+		ret = chunk_inflate2(p->addr, p->size, q->addr, &q->size,
+				     opts);
+		if (ret)
+			return ret;
+	}
+	return ret;
+}
+
 int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	       size_t *out_sz, struct test_options *opts, sem_t *sem)
+	       size_t *out_sz, struct test_options *opts, sem_t *sem,
+	       struct hizip_chunk_list *list)
 {
 	struct wd_comp_req req = {0};
-	size_t consume_sz = 0;
+	struct hizip_chunk_list *p = list;
 	off_t off;
-	int ret = 0;
+	int ret = 0, i;
 
 	req.src = in;
 	req.src_len = opts->block_size;
@@ -332,9 +520,13 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 		req.cb_param = sem;
 	}
 
-	for (off = 0; off < in_sz; off += opts->block_size) {
-		if (consume_sz + req.src_len > in_sz)
+	for (off = 0, i = 0; off < in_sz;) {
+		if (off + req.src_len > in_sz)
 			req.src_len = in_sz % req.src_len;
+		if (++i > HIZIP_CHUNK_LIST_ENTRIES) {
+			printf("No room in out list!\n");
+			return -EFAULT;
+		}
 		do {
 			if (opts->sync_mode) {
 				ret = wd_do_comp_async(h_dfl, &req);
@@ -347,9 +539,15 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 			} else
 				ret = wd_do_comp_sync(h_dfl, &req);
 		} while (ret == -WD_EBUSY);
-		consume_sz += req.src_len;
 		if (ret)
 			return ret;
+		if (p) {
+			p->addr = req.dst;
+			p->size = req.dst_len;
+			p->next = p + 1;
+			p++;
+		}
+		off += req.src_len;
 		req.src += opts->block_size;
 		req.src_len = opts->block_size;
 		req.dst += opts->block_size * EXPANSION_RATIO;
@@ -360,18 +558,20 @@ int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
 }
 
 int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	       size_t *out_sz, struct test_options *opts, sem_t *sem)
+	       size_t *out_sz, struct test_options *opts, sem_t *sem,
+	       struct hizip_chunk_list *list)
 {
 	struct wd_comp_req req = {0};
-	size_t sum = 0, chunk_sz, consume_sz = 0;
-	int ret;
+	struct hizip_chunk_list *p = list;
+	size_t sum = 0, chunk_sz, step;
+	off_t off = 0;
+	int ret, i = 0;
 
-	*out_sz = in_sz / EXPANSION_RATIO;
 	chunk_sz = opts->block_size;
 	req.src = in;
 	req.src_len = chunk_sz * EXPANSION_RATIO;
 	req.dst = out;
-	req.dst_len = chunk_sz;
+	req.dst_len = chunk_sz * INFLATION_RATIO;
 	req.op_type = WD_DIR_DECOMPRESS;
 	if (opts->sync_mode) {
 		req.cb = async2_cb;
@@ -379,8 +579,13 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	}
 
 	do {
-		if (consume_sz + req.src_len > in_sz)
+		if (off + req.src_len > in_sz)
 			req.src_len = in_sz % req.src_len;
+		if (++i > HIZIP_CHUNK_LIST_ENTRIES) {
+			printf("No room in out list!\n");
+			return -EFAULT;
+		}
+		printf("error, %d, off:%lx, src_len:%x, dst_len:%x\n", __LINE__, off, req.src_len, req.dst_len);
 		do {
 			if (opts->sync_mode) {
 				ret = wd_do_comp_async(h_ifl, &req);
@@ -393,15 +598,44 @@ int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
 			} else
 				ret = wd_do_comp_sync(h_ifl, &req);
 		} while (ret == -WD_EBUSY);
+		printf("error, %d, off:%lx, src_len:%x, dst_len:%x\n", __LINE__, off, req.src_len, req.dst_len);
 		if (ret)
 			return ret;
-		consume_sz += req.src_len;
-		req.src += chunk_sz * EXPANSION_RATIO;
-		req.src_len = chunk_sz * EXPANSION_RATIO;
-		req.dst += chunk_sz;
-		req.dst_len = chunk_sz;
-		sum += chunk_sz;
-	} while (!ret && (sum < *out_sz));
+		if (p) {
+			p->addr = req.dst;
+			p->size = req.dst_len;
+			p->next = p + 1;
+			p++;
+		}
+		if ((*((uint8_t *)req.src + req.src_len) == 0x1f) &&
+		    (*((uint8_t *)req.src + req.src_len + 1) == 0x8b)) {
+			/* gzip format */
+			off += req.src_len;
+			req.src += req.src_len;
+			req.src_len = chunk_sz * EXPANSION_RATIO;
+		} else {
+			if (req.src_len > chunk_sz) {
+				off += chunk_sz * EXPANSION_RATIO;
+				req.src += chunk_sz * EXPANSION_RATIO;
+				req.src_len = chunk_sz * EXPANSION_RATIO;
+			} else {
+				off += chunk_sz;
+				req.src += chunk_sz;
+				req.src_len = chunk_sz;
+			}
+		}
+		step = ALIGN(req.dst_len, chunk_sz);
+		if (sum + step > *out_sz) {
+			printf("No room for output!\n");
+			printf("off:%ld, sum:%ld, step:%ld, out_sz:%ld\n",
+				off, sum, step, *out_sz);
+			return -ENOMEM;
+		}
+		req.dst += step;
+		req.dst_len = chunk_sz * INFLATION_RATIO;
+		sum += step;
+	} while (!ret && (off + req.src_len < in_sz));
+	*out_sz = sum;
 	return 0;
 }
 
@@ -689,6 +923,233 @@ int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	return 0;
 }
 
+int hw_deflate4(handle_t h_dfl,
+		chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts,
+		sem_t *sem)
+{
+#if 0
+	struct wd_comp_req req = {0};
+	struct hizip_chunk_list *p = list;
+	off_t off;
+	int ret = 0, i;
+
+	req.src = in;
+	req.src_len = opts->block_size;
+	req.dst = out;
+	req.dst_len = opts->block_size * EXPANSION_RATIO;
+	req.op_type = WD_DIR_COMPRESS;
+	if (opts->sync_mode) {
+		req.cb = async2_cb;
+		req.cb_param = sem;
+	}
+
+	for (off = 0, i = 0; off < in_sz;) {
+		if (off + req.src_len > in_sz)
+			req.src_len = in_sz % req.src_len;
+		if (++i > HIZIP_CHUNK_LIST_ENTRIES) {
+			printf("No room in out list!\n");
+			return -EFAULT;
+		}
+		do {
+			if (opts->sync_mode) {
+				ret = wd_do_comp_async(h_dfl, &req);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend,
+							   1,
+							   __ATOMIC_ACQ_REL);
+					sem_wait(sem);
+				}
+			} else
+				ret = wd_do_comp_sync(h_dfl, &req);
+		} while (ret == -WD_EBUSY);
+		if (ret)
+			return ret;
+		if (p) {
+			p->addr = req.dst;
+			p->size = req.dst_len;
+			p->next = p + 1;
+			p++;
+		}
+		off += req.src_len;
+		req.src += opts->block_size;
+		req.src_len = opts->block_size;
+		req.dst += opts->block_size * EXPANSION_RATIO;
+		req.dst_len = opts->block_size * EXPANSION_RATIO;
+	}
+	*out_sz = in_sz * EXPANSION_RATIO;
+	return 0;
+#else
+	struct wd_comp_req *reqs;
+	chunk_list_t *p = in_list, *q = out_list;
+	int i, ret;
+
+	if (!in_list || !out_list || !opts || !sem)
+		return -EINVAL;
+	/* reqs array could make async operations in parallel */
+	reqs = calloc(1, sizeof(struct wd_comp_req) * HIZIP_CHUNK_LIST_ENTRIES);
+	if (!reqs)
+		return -ENOMEM;
+	for (i = 0; p && q; p = p->next, q = q->next, i++) {
+		reqs[i].src = p->addr;
+		reqs[i].src_len = p->size;
+		reqs[i].dst = q->addr;
+		reqs[i].dst_len = q->size;
+		reqs[i].op_type = WD_DIR_COMPRESS;
+		if (opts->sync_mode) {
+			reqs[i].cb = async2_cb;
+			reqs[i].cb_param = sem;
+		}
+		do {
+			if (opts->sync_mode) {
+				ret = wd_do_comp_async(h_dfl, &reqs[i]);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend, 1,
+							   __ATOMIC_ACQ_REL);
+					sem_wait(sem);
+				}
+			} else
+				ret = wd_do_comp_sync(h_dfl, &reqs[i]);
+		} while (ret == -WD_EBUSY);
+		if (ret)
+			goto out;
+		q->size = reqs[i].dst_len;
+	}
+	free(reqs);
+	return 0;
+out:
+	free(reqs);
+	return ret;
+#endif
+}
+
+int hw_inflate4(handle_t h_ifl,
+		chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts,
+		sem_t *sem)
+{
+#if 0
+	struct wd_comp_req req = {0};
+	struct hizip_chunk_list *p = list;
+	size_t sum = 0, chunk_sz, step;
+	off_t off = 0;
+	int ret, i = 0;
+
+	chunk_sz = opts->block_size;
+	req.src = in;
+	req.src_len = chunk_sz * EXPANSION_RATIO;
+	req.dst = out;
+	req.dst_len = chunk_sz * INFLATION_RATIO;
+	req.op_type = WD_DIR_DECOMPRESS;
+	if (opts->sync_mode) {
+		req.cb = async2_cb;
+		req.cb_param = sem;
+	}
+
+	do {
+		if (off + req.src_len > in_sz)
+			req.src_len = in_sz % req.src_len;
+		if (++i > HIZIP_CHUNK_LIST_ENTRIES) {
+			printf("No room in out list!\n");
+			return -EFAULT;
+		}
+		printf("error, %d, off:%lx, src_len:%x, dst_len:%x\n", __LINE__, off, req.src_len, req.dst_len);
+		do {
+			if (opts->sync_mode) {
+				ret = wd_do_comp_async(h_ifl, &req);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend,
+							   1,
+							   __ATOMIC_ACQ_REL);
+					sem_wait(sem);
+				}
+			} else
+				ret = wd_do_comp_sync(h_ifl, &req);
+		} while (ret == -WD_EBUSY);
+		printf("error, %d, off:%lx, src_len:%x, dst_len:%x\n", __LINE__, off, req.src_len, req.dst_len);
+		if (ret)
+			return ret;
+		if (p) {
+			p->addr = req.dst;
+			p->size = req.dst_len;
+			p->next = p + 1;
+			p++;
+		}
+		if ((*((uint8_t *)req.src + req.src_len) == 0x1f) &&
+		    (*((uint8_t *)req.src + req.src_len + 1) == 0x8b)) {
+			/* gzip format */
+			off += req.src_len;
+			req.src += req.src_len;
+			req.src_len = chunk_sz * EXPANSION_RATIO;
+		} else {
+			if (req.src_len > chunk_sz) {
+				off += chunk_sz * EXPANSION_RATIO;
+				req.src += chunk_sz * EXPANSION_RATIO;
+				req.src_len = chunk_sz * EXPANSION_RATIO;
+			} else {
+				off += chunk_sz;
+				req.src += chunk_sz;
+				req.src_len = chunk_sz;
+			}
+		}
+		step = ALIGN(req.dst_len, chunk_sz);
+		if (sum + step > *out_sz) {
+			printf("No room for output!\n");
+			printf("off:%ld, sum:%ld, step:%ld, out_sz:%ld\n",
+				off, sum, step, *out_sz);
+			return -ENOMEM;
+		}
+		req.dst += step;
+		req.dst_len = chunk_sz * INFLATION_RATIO;
+		sum += step;
+	} while (!ret && (off + req.src_len < in_sz));
+	*out_sz = sum;
+	return 0;
+#else
+	struct wd_comp_req *reqs;
+	chunk_list_t *p, *q;
+	int i = 0, ret;
+
+	/* reqs array could make async operations in parallel */
+	reqs = calloc(1, sizeof(struct wd_comp_req) * HIZIP_CHUNK_LIST_ENTRIES);
+	if (!reqs)
+		return -ENOMEM;
+	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
+		reqs[i].src = p->addr;
+		reqs[i].src_len = p->size;
+		reqs[i].dst = q->addr;
+		reqs[i].dst_len = q->size;
+		reqs[i].op_type = WD_DIR_DECOMPRESS;
+		if (opts->sync_mode) {
+			reqs[i].cb = async2_cb;
+			reqs[i].cb_param = sem;
+		}
+		do {
+			if (opts->sync_mode) {
+				ret = wd_do_comp_async(h_ifl, &reqs[i]);
+				if (!ret) {
+					__atomic_add_fetch(&sum_pend, 1,
+							   __ATOMIC_ACQ_REL);
+					sem_wait(sem);
+				}
+			} else
+				ret = wd_do_comp_sync(h_ifl, &reqs[i]);
+		} while (ret == -WD_EBUSY);
+		if (ret)
+			goto out;
+		i++;
+		q->size = reqs[i].dst_len;
+	}
+	free(reqs);
+	return 0;
+out:
+	free(reqs);
+	return ret;
+#endif
+}
+
 void *poll2_thread_func(void *arg)
 {
 	thread_data_t *tdata = (thread_data_t *)arg;
@@ -920,7 +1381,7 @@ int hw_stream_compress(int alg_type, int blksize, __u8 data_fmt,
 {
 	handle_t h_sess;
 	struct wd_comp_sess_setup setup;
-	struct wd_comp_req req;
+	struct wd_comp_req req = {0};
 	int ret = 0;
 
 	setup.alg_type = alg_type;
@@ -971,7 +1432,7 @@ int hw_stream_decompress(int alg_type, int blksize, __u8 data_fmt,
 {
 	handle_t h_sess;
 	struct wd_comp_sess_setup setup;
-	struct wd_comp_req req;
+	struct wd_comp_req req = {0};
 	int ret = 0;
 
 
@@ -1366,6 +1827,93 @@ out:
 	return ret;
 }
 
+/*
+ * info->in_buf & info->out_buf should be allocated first.
+ * Thread 0 shares info->out_buf. Other threads need to create its own
+ * dst buffer.
+ */
+int create_send3_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*send_thread_func)(void *arg)
+			)
+{
+	pthread_attr_t attr;
+	thread_data_t *tdata;
+	chunk_list_t *in_list;
+	int i, j, num, ret;
+
+	if (!opts || !info || !send_thread_func ||
+	    !info->in_chunk_sz || !info->out_chunk_sz)
+		return -EINVAL;
+	num = opts->thread_num;
+	info->send_tds = calloc(1, sizeof(pthread_t) * num);
+	if (!info->send_tds)
+		return -ENOMEM;
+	info->send_tnum = num;
+	info->tdatas = calloc(1, sizeof(thread_data_t) * num);
+	if (!info->tdatas) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	in_list = create_chunk_list(info->in_buf, info->in_size,
+				    info->in_chunk_sz);
+	if (!in_list) {
+		ret = -EINVAL;
+		goto out_in;
+	}
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	for (i = 0; i < num; i++) {
+		tdata = &info->tdatas[i];
+		/* src address is shared among threads */
+		tdata->tid = i;
+		tdata->src_sz = info->in_size;
+		tdata->src = info->in_buf;
+		tdata->in_list = in_list;
+		tdata->dst_sz = info->out_size;
+		tdata->dst = mmap_alloc(tdata->dst_sz);
+		if (!tdata->dst) {
+			ret = -ENOMEM;
+			goto out_dst;
+		}
+		tdata->out_list = create_chunk_list(tdata->dst,
+						    tdata->dst_sz,
+						    info->out_chunk_sz);
+		if (!tdata->out_list) {
+			ret = -EINVAL;
+			goto out_list;
+		}
+		calculate_md5(&tdata->md5, tdata->src, tdata->src_sz);
+
+		tdata->info = info;
+		ret = pthread_create(&info->send_tds[i], &attr,
+				     send_thread_func, tdata);
+		if (ret < 0) {
+			fprintf(stderr, "Fail to create send thread %d (%d)\n",
+				i, ret);
+			goto out_thd;
+		}
+	}
+	pthread_attr_destroy(&attr);
+	return 0;
+out_thd:
+	free_chunk_list(tdata->out_list);
+out_list:
+	mmap_free(tdata->dst, tdata->dst_sz);
+out_dst:
+	for (j = 0; j < i; j++) {
+		pthread_cancel(info->send_tds[j]);
+		free_chunk_list(info->tdatas[j].out_list);
+		mmap_free(info->tdatas[j].dst, info->tdatas[j].dst_sz);
+	}
+	free_chunk_list(in_list);
+out_in:
+	free(info->tdatas);
+out:
+	free(info->send_tds);
+	return ret;
+}
+
 int create_poll_threads(struct hizip_test_info *info,
 			void *(*poll_thread_func)(void *arg),
 			int num)
@@ -1467,12 +2015,27 @@ int attach_threads(struct test_options *opts, struct hizip_test_info *info)
 	return (int)(uintptr_t)tret;
 }
 
+/*
+ * Free source and destination buffer contained in sending threads.
+ * Free sending threads and polling threads.
+ */
 void free_threads(struct hizip_test_info *info)
 {
+	thread_data_t *tdatas = info->tdatas;
+	int i;
+
 	if (info->send_tds)
 		free(info->send_tds);
 	if (info->poll_tds)
 		free(info->poll_tds);
+	for (i = 0; i < info->send_tnum; i++) {
+		free_chunk_list(tdatas[i].in_list);
+		free_chunk_list(tdatas[i].out_list);
+	}
+	/* info->out_buf is bound to tdatas[0].dst */
+	for (i = 0; i < info->send_tnum; i++)
+		mmap_free(tdatas[i].dst, tdatas[i].dst_sz);
+	mmap_free(info->in_buf, info->in_size);
 }
 
 /*

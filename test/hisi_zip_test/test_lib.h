@@ -26,6 +26,10 @@ do { \
 	} \
 } while (0)
 
+#define __ALIGN_MASK(x, mask)	(((x) + (mask)) & ~(mask))
+#define ALIGN(x, a)		__ALIGN_MASK(x, (typeof(x))(a)-1)
+#define MIN(a, b)		((a < b) ? a : b)
+
 enum mode {
 	MODE_BLOCK,
 	MODE_STREAM,
@@ -36,8 +40,11 @@ enum mode {
  * just in case. TODO: reduce this
  */
 #define EXPANSION_RATIO	2
+#define INFLATION_RATIO	16
 
 #define SGE_SIZE	(8 * 1024)
+
+#define HIZIP_CHUNK_LIST_ENTRIES	4096
 
 struct test_options {
 	int alg_type;
@@ -106,6 +113,12 @@ typedef struct _comp_md5_t {
 	unsigned char	md[MD5_DIGEST_LENGTH];
 } comp_md5_t;
 
+typedef struct hizip_chunk_list {
+	void *addr;
+	size_t size;
+	struct hizip_chunk_list *next;
+} chunk_list_t;
+
 typedef struct _thread_data_t {
 	struct hizip_test_info *info;
 	struct wd_comp_req req;
@@ -126,12 +139,16 @@ typedef struct _thread_data_t {
 	size_t src_sz;
 	size_t dst_sz;
 	size_t sum;	/* produced bytes for OUT */
+	chunk_list_t *in_list;
+	chunk_list_t *out_list;
 } thread_data_t;
 
 struct hizip_test_info {
 	struct test_options *opts;
 	char *in_buf, *out_buf;
 	size_t in_size, out_size;
+	/* in_chunk_sz & out_chunk_sz are used to format entries in list */
+	size_t in_chunk_sz, out_chunk_sz;
 	size_t total_out;
 	struct uacce_dev_list *list;
 	handle_t h_sess;
@@ -140,6 +157,7 @@ struct hizip_test_info {
 	int send_tnum;
 	pthread_t *poll_tds;
 	int poll_tnum;
+	thread_data_t *tdatas;
 	struct hizip_stats *stats;
 	struct {
 		struct timespec setup_time;
@@ -160,6 +178,10 @@ void gen_random_data(void *buf, size_t len);
 int calculate_md5(comp_md5_t *md5, const void *buf, size_t len);
 void dump_md5(comp_md5_t *md5);
 int cmp_md5(comp_md5_t *orig, comp_md5_t *final);
+void init_chunk_list(chunk_list_t *list, void *buf, size_t buf_sz,
+		     size_t chunk_sz);
+chunk_list_t *create_chunk_list(void *buf, size_t buf_sz, size_t chunk_sz);
+void free_chunk_list(chunk_list_t *list);
 int run_self_test(void);
 int run_cmd(struct test_options *opts);
 void *send_thread_func(void *arg);
@@ -170,6 +192,10 @@ int create_send_threads(struct test_options *opts,
 			void *(*send_thread_func)(void *arg)
 			);
 int create_send2_threads(struct test_options *opts,
+			 struct hizip_test_info *info,
+			 void *(*send_thread_func)(void *arg)
+			);
+int create_send3_threads(struct test_options *opts,
 			 struct hizip_test_info *info,
 			 void *(*send_thread_func)(void *arg)
 			);
@@ -210,9 +236,11 @@ int sw_deflate(void *in, void *out, size_t in_sz, size_t *out_sz,
 int sw_inflate(void *in, void *out, size_t in_sz, size_t *out_sz,
 	       struct test_options *opts);
 int hw_deflate(handle_t h_dfl, void *in, void *out, size_t in_sz,
-	       size_t *out_sz, struct test_options *opts, sem_t *sem);
+	       size_t *out_sz, struct test_options *opts, sem_t *sem,
+	       struct hizip_chunk_list *list);
 int hw_inflate(handle_t h_ifl, void *in, void *out, size_t in_sz,
-	       size_t *out_sz, struct test_options *opts, sem_t *sem);
+	       size_t *out_sz, struct test_options *opts, sem_t *sem,
+	       struct hizip_chunk_list *list);
 int hw_deflate2(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	        size_t *out_sz, thread_data_t *tdata);
 int hw_inflate2(handle_t h_ifl, void *in, void *out, size_t in_sz,
@@ -221,6 +249,22 @@ int hw_deflate3(handle_t h_dfl, void *in, void *out, size_t in_sz,
 	        size_t *out_sz, thread_data_t *tdata);
 int hw_inflate3(handle_t h_ifl, void *in, void *out, size_t in_sz,
 	        size_t *out_sz, thread_data_t *tdata);
+int sw_deflate2(chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts);
+int sw_inflate2(chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts);
+int hw_deflate4(handle_t h_dfl,
+		chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts,
+		sem_t *sem);
+int hw_inflate4(handle_t h_ifl,
+		chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		struct test_options *opts,
+		sem_t *sem);
 
 /* for block interface */
 int hw_blk_compress(int alg_type, int blksize, __u8 data_fmt, void *priv,
