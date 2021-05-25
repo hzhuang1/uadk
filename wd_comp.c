@@ -429,7 +429,7 @@ int wd_do_comp_sync2(handle_t h_sess, struct wd_comp_req *req)
 	struct wd_comp_req strm_req;
 	__u32 total_avail_out = req->dst_len;
 	__u32 chunk = STREAM_CHUNK;
-	__u32 avail_in = 0;
+	__u32 avail_in = req->src_len;
 	__u32 avail_out;
 	int ret;
 
@@ -460,20 +460,11 @@ int wd_do_comp_sync2(handle_t h_sess, struct wd_comp_req *req)
 
 	strm_req.last = 0;
 	while (1) {
-		if (req->src_len > chunk) {
-			strm_req.src_len = chunk;
-			req->src_len -= chunk;
-		} else {
-			strm_req.src_len = req->src_len;
-			req->src_len = 0;
-		}
-		avail_in = strm_req.src_len;
-		if (req->op_type == WD_DIR_COMPRESS)
-			strm_req.last = (strm_req.src_len == chunk) ? 0 : 1;
-
+		strm_req.src_len = avail_in > chunk ? chunk : avail_in;
 		do {
+			if (req->op_type == WD_DIR_COMPRESS)
+				strm_req.last = (strm_req.src_len == chunk) ? 0 : 1;
 			if (req->op_type == WD_DIR_COMPRESS &&
-			    strm_req.src_len == 0 &&
 			    strm_req.last == 1) {
 				dbg("append_store, src_len=%u, dst_len=%u\n",
 				    req->src_len, req->dst_len);
@@ -484,8 +475,10 @@ int wd_do_comp_sync2(handle_t h_sess, struct wd_comp_req *req)
 			}
 			dbg("do, strm start, in =%u, out_len =%u\n",
 			    strm_req.src_len, strm_req.dst_len);
-			if (req->dst_len + strm_req.src_len > total_avail_out)
+			if (req->dst_len + strm_req.src_len > total_avail_out) {
 				return -WD_ENOMEM;
+			}
+			strm_req.src_len = avail_in > chunk ? chunk : avail_in;
 			strm_req.dst_len = avail_out > chunk ? chunk : avail_out;
 			ret = wd_do_comp_strm(h_sess, &strm_req);
 			if (ret < 0 || strm_req.status == WD_IN_EPARA) {
@@ -502,8 +495,8 @@ int wd_do_comp_sync2(handle_t h_sess, struct wd_comp_req *req)
 
 			strm_req.src += strm_req.src_len;
 			avail_in -= strm_req.src_len;
-			strm_req.src_len = avail_in;
-		} while (strm_req.src_len > 0);
+			strm_req.src_len = chunk;
+		} while (avail_in > 0);
 
 		/*
 		 * When a stream request end, 'stream_pos' will be reset as
