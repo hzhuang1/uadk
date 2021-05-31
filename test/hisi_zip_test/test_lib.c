@@ -493,6 +493,7 @@ int sw_inflate2(chunk_list_t *in_list, chunk_list_t *out_list,
 	int ret;
 
 	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
+		printf("#%s, %d\n", __func__, __LINE__);
 		ret = chunk_inflate2(p->addr, p->size, q->addr, &q->size,
 				     opts);
 		if (ret)
@@ -1839,7 +1840,7 @@ int create_send3_threads(struct test_options *opts,
 {
 	pthread_attr_t attr;
 	thread_data_t *tdata;
-	chunk_list_t *in_list;
+	chunk_list_t *in_list, *out_list;
 	int i, j, num, ret;
 
 	if (!opts || !info || !send_thread_func ||
@@ -1855,8 +1856,13 @@ int create_send3_threads(struct test_options *opts,
 		ret = -ENOMEM;
 		goto out;
 	}
-	in_list = create_chunk_list(info->in_buf, info->in_size,
-				    info->in_chunk_sz);
+	if (opts->is_stream) {
+		in_list = create_chunk_list(info->in_buf, info->in_size,
+					    info->in_size);
+	} else {
+		in_list = create_chunk_list(info->in_buf, info->in_size,
+					    info->in_chunk_sz);
+	}
 	if (!in_list) {
 		ret = -EINVAL;
 		goto out_in;
@@ -1876,9 +1882,16 @@ int create_send3_threads(struct test_options *opts,
 			ret = -ENOMEM;
 			goto out_dst;
 		}
-		tdata->out_list = create_chunk_list(tdata->dst,
-						    tdata->dst_sz,
-						    info->out_chunk_sz);
+		if (opts->is_stream) {
+			out_list = create_chunk_list(tdata->dst,
+						     tdata->dst_sz,
+						     tdata->dst_sz);
+		} else {
+			out_list = create_chunk_list(tdata->dst,
+						     tdata->dst_sz,
+						     info->out_chunk_sz);
+		}
+		tdata->out_list = out_list;
 		if (!tdata->out_list) {
 			ret = -EINVAL;
 			goto out_list;

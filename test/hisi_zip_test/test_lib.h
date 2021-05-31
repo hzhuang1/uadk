@@ -76,6 +76,10 @@ struct test_options {
 	int fd_in;
 	/* output file */
 	int fd_out;
+	/* inlist file */
+	int fd_ilist;
+	/* outlist file */
+	int fd_olist;
 
 	/* 0: pbuffer, 1: sgl */
 	__u8 data_fmt;

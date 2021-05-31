@@ -238,6 +238,7 @@ static void *hw_dfl_sw_ifl(void *arg)
 			init_chunk_list(tdata->out_list, tdata->dst,
 					tdata->dst_sz, tdata->dst_sz);
 			tmp_sz = tbuf_sz;
+			printf("#%s, %d, tmp_sz:%d\n", __func__, __LINE__, tmp_sz);
 			ret = hw_stream_compress(opts->alg_type,
 						 opts->block_size,
 						 opts->data_fmt,
@@ -249,12 +250,15 @@ static void *hw_dfl_sw_ifl(void *arg)
 				printf("Fail to deflate by HW: %d\n", ret);
 				goto out_strm;
 			}
+			printf("#%s, %d, tmp_sz:%d\n", __func__, __LINE__, tmp_sz);
 			tlist->size = tmp_sz;	// write back
+			printf("#%s, %d, out_list->addr:%p, out_list->size:%ld\n", __func__, __LINE__, tdata->out_list->addr, tdata->out_list->size);
 			ret = sw_inflate2(tlist, tdata->out_list, opts);
 			if (ret) {
 				printf("Fail to inflate by zlib: %d\n", ret);
 				goto out_strm;
 			}
+			printf("#%s, %d, out_list->addr:%p, out_list->size:%ld\n", __func__, __LINE__, tdata->out_list->addr, tdata->out_list->size);
 			ret = calculate_md5(&tdata->md5, tdata->in_list->addr,
 					    tdata->in_list->size);
 			if (ret) {
@@ -489,10 +493,8 @@ static void *hw_dfl_perf(void *arg)
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
 	struct wd_comp_sess_setup setup = {0};
-	//chunk_list_t *list, *p = NULL;
 	handle_t h_dfl;
 	int i, ret;
-	//size_t out_sz = tdata->dst_sz, file_sz = 0;
 	uint32_t tout_sz;
 
 	if (opts->is_stream) {
@@ -509,8 +511,11 @@ static void *hw_dfl_perf(void *arg)
 				printf("Fail to deflate by HW: %d\n", ret);
 				return (void *)(uintptr_t)ret;
 			}
-			ret = tout_sz;
 		}
+		tdata->out_list->addr = tdata->dst;
+		tdata->out_list->size = tout_sz;
+		tdata->out_list->next = NULL;
+		printf("#%s, %d, addr:%p, size:%ld\n", __func__, __LINE__, tdata->out_list->addr, tdata->out_list->size);
 		return NULL;
 	}
 
@@ -586,7 +591,6 @@ static void *hw_ifl_perf(void *arg)
 	int i, ret;
 	//size_t out_sz = tdata->dst_sz, file_sz = 0;
 	uint32_t tout_sz;
-
 	fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 	if (opts->is_stream) {
 		for (i = 0; i < opts->compact_run_num; i++) {
@@ -620,6 +624,9 @@ static void *hw_ifl_perf(void *arg)
 
 	for (i = 0; i < opts->compact_run_num; i++) {
 		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
+		init_chunk_list(tdata->out_list, tdata->dst,
+				tdata->dst_sz,
+				info->out_chunk_sz);
 		ret = hw_inflate4(h_ifl, tdata->in_list, tdata->out_list, opts,
 				  &tdata->sem);
 		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
@@ -798,6 +805,92 @@ out:
 	return ret;
 }
 
+/*
+ * Load both ilist file.
+ */
+int load_ilist(struct hizip_test_info *info, char *model)
+{
+	struct test_options *opts = info->opts;
+	thread_data_t *tdata = &info->tdatas[0];
+	chunk_list_t *p;
+	size_t file_sz = 0, sum = 0;
+
+	if (!strcmp(model, "hw_ifl_perf")) {
+		if (opts->fd_ilist <= 0) {
+			printf("Missing IN list file!\n");
+			return -EINVAL;
+		}
+		p = tdata->in_list;
+		while (p) {
+			file_sz = read(opts->fd_ilist, p,
+					sizeof(chunk_list_t));
+			if (file_sz < 0)
+				return -EFAULT;
+			/* next field is obsolete */
+			if (p->next)
+				p->next = p + 1;
+			p = p->next;
+			sum += file_sz;
+		}
+	}
+	return (int)sum;
+}
+
+/*
+ * Load compression/decompression content.
+ */
+int load_file_data(struct hizip_test_info *info)
+{
+	struct test_options *opts = info->opts;
+	size_t file_sz;
+
+	file_sz = read(opts->fd_in, info->in_buf, info->in_size);
+	if (file_sz < info->in_size) {
+		printf("Expect to read %ld bytes. "
+		       "But only read %ld bytes!\n",
+		       info->in_size, file_sz);
+		return -EFAULT;
+	}
+	return (int)file_sz;
+}
+
+/*
+ * Store both olist file. opts->is_file must be enabled first.
+ */
+int store_olist(struct hizip_test_info *info, char *model)
+{
+	struct test_options *opts = info->opts;
+	thread_data_t *tdata = &info->tdatas[0];
+	chunk_list_t *p;
+	size_t file_sz = 0, sum = 0;
+
+	if ((opts->fd_olist >= 0) && !opts->is_stream) {
+		p = tdata->out_list;
+		while (p) {
+			file_sz = write(opts->fd_olist, p,
+					sizeof(chunk_list_t));
+			if (file_sz < sizeof(chunk_list_t))
+				return -EFAULT;
+			file_sz = write(opts->fd_out, p->addr,
+					p->size);
+			if (file_sz < p->size)
+				return -EFAULT;
+			p = p->next;
+			sum += file_sz;
+		}
+		fprintf(stderr, "#%s, %d, sum:%lx\n", __func__, __LINE__, sum);
+	} else if (opts->is_stream) {
+		p = tdata->out_list;
+		printf("#%s, %d, addr:%p, size:%ld\n", __func__, __LINE__, p->addr, p->size);
+		file_sz = write(opts->fd_out, p->addr, p->size);
+		if (file_sz < p->size)
+			return -EFAULT;
+		sum = file_sz;
+		fprintf(stderr, "#%s, %d, sum:%lx\n", __func__, __LINE__, sum);
+	}
+	return (int)sum;
+}
+
 int test_hw(struct test_options *opts, char *model)
 {
 	struct hizip_test_info info = {0};
@@ -809,7 +902,7 @@ int test_hw(struct test_options *opts, char *model)
 	void *(*func)(void *);
 	size_t tbuf_sz = 0, /*out_sz = 0, */ifl_in_sz = 0;
 	void *tbuf = NULL;
-	ssize_t file_sz;
+	//ssize_t file_sz;
 	struct stat statbuf;
 	chunk_list_t *tlist;
 
@@ -926,13 +1019,12 @@ int test_hw(struct test_options *opts, char *model)
 	if (ret)
 		goto out_poll;
 	if (opts->is_file) {
-		file_sz = read(opts->fd_in, info.in_buf, info.in_size);
-		if (file_sz < info.in_size) {
-			printf("Expect to read %ld bytes. "
-			       "But only read %ld bytes!\n",
-			       info.in_size, file_sz);
+		/* in_list is created by create_send3_threads(). */
+		ret = load_ilist(&info, model);
+		ret = load_file_data(&info);
+		fprintf(stderr, "#%s, %d, ret:%d\n", __func__, __LINE__, ret);
+		if (ret < 0)
 			goto out_buf;
-		}
 	} else {
 		if (ifl_flag) {
 			thread_data_t *tdata = info.tdatas;
@@ -983,6 +1075,9 @@ int test_hw(struct test_options *opts, char *model)
 			goto out_poll;
 		}
 	}
+#else
+	if (opts->is_file)
+		store_olist(&info, model);
 #endif
 
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
@@ -1033,9 +1128,9 @@ int run_self_test(void)
 		.thread_num		= 1,
 		//.thread_num		= 16,
 		.q_num			= 16,
-		//.block_size		= 1024,
+		.block_size		= 1024,
 		//.total_len		= 1024 * 2,
-		.block_size		= 8192,
+		//.block_size		= 8192,
 		.total_len		= 8192 * 10,
 		//.compact_run_num	= 1000,
 		.compact_run_num	= 1,
@@ -1043,6 +1138,7 @@ int run_self_test(void)
 	int /*i, */f_ret = 0;
 
 	printf("Start to run self test!\n");
+#if 0
 	f_ret |= test_sw_dfl_sw_ifl(&opts);
 	opts.is_stream = 0;
 	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
@@ -1056,6 +1152,13 @@ int run_self_test(void)
 	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
 	f_ret |= test_hw(&opts, "hw_dfl_perf");
 	f_ret |= test_hw(&opts, "hw_ifl_perf");
+#else
+	opts.is_stream = 1;
+	opts.block_size = 8192;
+	opts.total_len = 1024 * 1024;
+	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
+	//f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
+#endif
 #if 0
 	for (i = 0; i < 1; i++) {
 		opts.sync_mode = 0;

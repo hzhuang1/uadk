@@ -760,6 +760,8 @@ int main(int argc, char **argv)
 		{"self",	no_argument,		0, 0 },
 		{"in",		required_argument,	0, 0 },
 		{"out",		required_argument,	0, 0 },
+		{"ilist",	required_argument,	0, 0 },
+		{"olist",	required_argument,	0, 0 },
 		{0,		0,			0, 0 },
 	};
 	int show_help = 0;
@@ -814,6 +816,46 @@ int main(int argc, char **argv)
 					show_help = 1;
 				}
 				break;
+			case 3:
+				if (!optarg) {
+					printf("IN list file is missing!\n");
+					show_help = 1;
+					break;
+				}
+				opts.fd_ilist = open(optarg, O_RDONLY);
+				if (opts.fd_ilist < 0) {
+					printf("Fail to open %s\n", optarg);
+					show_help = 1;
+					break;
+				}
+				opts.is_file = true;
+				if (lseek(opts.fd_ilist, 0, SEEK_SET) < 0) {
+					printf("Fail on lseek()!\n");
+					show_help = 1;
+					break;
+				}
+				break;
+			case 4:
+				if (!optarg) {
+					printf("OUT list file is missing!\n");
+					show_help = 1;
+					break;
+				}
+				opts.fd_olist = open(optarg,
+						     O_CREAT | O_WRONLY,
+						     S_IWUSR | S_IRGRP |
+						     S_IROTH);
+				if (opts.fd_olist < 0) {
+					printf("Fail to open %s\n", optarg);
+					show_help = 1;
+					break;
+				}
+				opts.is_file = true;
+				if (lseek(opts.fd_olist, 0, SEEK_SET) < 0) {
+					printf("Fail on lseek()!\n");
+					show_help = 1;
+					break;
+				}
 			default:
 				show_help = 1;
 				break;
@@ -879,6 +921,28 @@ int main(int argc, char **argv)
 			printf("Input file and output file must be specified "
 				"together!\n");
 			show_help = 1;
+		}
+		/* --ilist && --olist are only used in BLOCK mode */
+		if (opts.is_stream) {
+			if (opts.fd_ilist >= 0) {
+				close(opts.fd_ilist);
+				opts.fd_ilist = -1;
+			}
+			if (opts.fd_olist >= 0) {
+				close(opts.fd_olist);
+				opts.fd_olist = -1;
+			}
+		} else {
+			if ((opts.fd_ilist < 0) &&
+			    (opts.op_type == WD_DIR_DECOMPRESS)) {
+				printf("--ilist is necessary for inflate!\n");
+				show_help = 1;
+			}
+			if ((opts.fd_olist < 0) &&
+			    (opts.op_type == WD_DIR_COMPRESS)) {
+				printf("--olist is necessary for deflate!\n");
+				show_help = 1;
+			}
 		}
 	}
 
