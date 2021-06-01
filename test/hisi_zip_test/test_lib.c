@@ -1882,6 +1882,7 @@ int create_send3_threads(struct test_options *opts,
 			ret = -ENOMEM;
 			goto out_dst;
 		}
+		memset(tdata->dst, 0, tdata->dst_sz);
 		if (opts->is_stream) {
 			out_list = create_chunk_list(tdata->dst,
 						     tdata->dst_sz,

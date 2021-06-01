@@ -515,7 +515,6 @@ static void *hw_dfl_perf(void *arg)
 		tdata->out_list->addr = tdata->dst;
 		tdata->out_list->size = tout_sz;
 		tdata->out_list->next = NULL;
-		printf("#%s, %d, addr:%p, size:%ld\n", __func__, __LINE__, tdata->out_list->addr, tdata->out_list->size);
 		return NULL;
 	}
 
@@ -1011,6 +1010,7 @@ int test_hw(struct test_options *opts, char *model)
 		ret = -ENOMEM;
 		goto out_src;
 	}
+	memset(info.in_buf, 0, info.in_size);
 	ret = create_send3_threads(opts, &info, func);
 	if (ret)
 		goto out_send;
