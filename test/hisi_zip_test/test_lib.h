@@ -44,7 +44,7 @@ enum mode {
 
 #define SGE_SIZE	(8 * 1024)
 
-#define HIZIP_CHUNK_LIST_ENTRIES	4096
+#define HIZIP_CHUNK_LIST_ENTRIES	32768
 
 struct test_options {
 	int alg_type;

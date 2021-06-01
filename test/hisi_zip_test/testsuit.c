@@ -1029,7 +1029,6 @@ int test_hw(struct test_options *opts, char *model)
 		if (ifl_flag) {
 			thread_data_t *tdata = info.tdatas;
 			tbuf_sz = info.in_size / EXPANSION_RATIO;
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 			tbuf = mmap_alloc(tbuf_sz);
 			if (!tbuf) {
 				ret = -ENOMEM;
@@ -1043,17 +1042,12 @@ int test_hw(struct test_options *opts, char *model)
 			init_chunk_list(tdata[0].in_list, tdata[0].src,
 					tdata[0].src_sz,
 					info.in_chunk_sz);
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 			gen_random_data(tbuf, tbuf_sz);
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 			ret = sw_deflate2(tlist, tdata[0].in_list, opts);
-		fprintf(stderr, "#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 			if (ret)
 				goto out_dfl;
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 			mmap_free(tbuf, tbuf_sz);
 			//info.in_size = out_sz;
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 		} else
 			gen_random_data(info.in_buf, info.in_size);
 	}

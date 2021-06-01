@@ -446,8 +446,8 @@ chunk_list_t *create_chunk_list(void *buf, size_t buf_sz, size_t chunk_sz)
 
 	count = (buf_sz + chunk_sz - 1) / chunk_sz;
 	if (count > HIZIP_CHUNK_LIST_ENTRIES)
-		return NULL;
-	if (buf_sz / chunk_sz < count)
+		count = HIZIP_CHUNK_LIST_ENTRIES;
+	if (buf_sz / chunk_sz > count)
 		return NULL;
 	/* allocate entries with additional one */
 	list = malloc(sizeof(chunk_list_t) * (count + 1));

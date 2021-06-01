@@ -2,6 +2,9 @@
 
 #VALGRIND="valgrind --tool=memcheck --leak-check=yes"
 RM="sudo rm"
+CP="sudo cp"
+CHMOD="sudo chmod"
+
 WORKSPACE=/home/hzhuang1
 LIB_ROOT=${WORKSPACE}/uadk-dynamic-v2
 LIB_DIR=usr/local/lib
@@ -136,8 +139,8 @@ prepare_src_file()
 		dd if=/dev/urandom of=origin bs=1M count=$2 &> /dev/null
 		;;
 	*)
-		sudo cp $1 origin
-		sudo chmod 777 origin
+		${CP} $1 origin
+		${CHMOD} 777 origin
 		;;
 	esac
 }
@@ -172,11 +175,13 @@ hw_dfl_sw_ifl()
 	hw_blk_deflate origin /tmp/ori.gz gzip -b 8192
 	sw_inflate /tmp/ori.gz origin gzip
 	md5sum -c ori.md5
+	echo "verified block for file"
 
 	${RM} -f /tmp/ori.gz
 	hw_strm_deflate origin /tmp/ori.gz gzip -b 8192
 	sw_inflate /tmp/ori.gz origin gzip
 	md5sum -c ori.md5
+	echo "verified stream for file"
 }
 
 # arg1: existed text file
