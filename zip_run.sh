@@ -117,6 +117,20 @@ sw_blk_inflate()
 }
 
 # arg1: source file, arg2: destination file, arg3: algorithm type
+sw_strm_deflate()
+{
+	case $3 in
+	"gzip")
+		gzip -c --fast < $1 > $2 || exit_code=$?
+		;;
+	*)
+		echo "Unsupported algorithm type: $3"
+		return -1
+		;;
+	esac
+}
+
+# arg1: source file, arg2: destination file, arg3: algorithm type
 sw_strm_inflate()
 {
 	case $3 in
@@ -194,8 +208,8 @@ sw_dfl_hw_ifl()
 	md5sum origin > ori.md5
 
 	# Only gzip compress and hardware decompress
-	sw_deflate origin /tmp/ori.gz gzip
-	hw_strm_inflate /tmp/ori.gz origin gzip -b 32768
+	sw_strm_deflate origin /tmp/ori.gz gzip
+	hw_strm_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5
 
 	# Use existed text file. It's not in alignment.
@@ -204,8 +218,8 @@ sw_dfl_hw_ifl()
 	md5sum origin > ori.md5
 
 	# Only gzip compress and hardware decompress
-	sw_deflate origin /tmp/ori.gz gzip
-	hw_strm_inflate /tmp/ori.gz origin gzip -b 32768
+	sw_strm_deflate origin /tmp/ori.gz gzip
+	hw_strm_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5
 }
 
@@ -247,7 +261,7 @@ if [ ! -z $1 ]; then
 	exit
 fi
 hw_dfl_sw_ifl /var/log/syslog
-#sw_dfl_hw_ifl /var/log/syslog
+sw_dfl_hw_ifl /var/log/syslog
 #hw_dfl_hw_ifl /var/log/syslog
 exit
 

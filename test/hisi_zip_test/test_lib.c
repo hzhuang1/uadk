@@ -493,7 +493,6 @@ int sw_inflate2(chunk_list_t *in_list, chunk_list_t *out_list,
 	int ret;
 
 	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
-		printf("#%s, %d\n", __func__, __LINE__);
 		ret = chunk_inflate2(p->addr, p->size, q->addr, &q->size,
 				     opts);
 		if (ret)
