@@ -590,12 +590,9 @@ static void *hw_ifl_perf(void *arg)
 	int i, ret;
 	//size_t out_sz = tdata->dst_sz, file_sz = 0;
 	uint32_t tout_sz;
-	fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
+
 	if (opts->is_stream) {
 		for (i = 0; i < opts->compact_run_num; i++) {
-			init_chunk_list(tdata->out_list, tdata->dst,
-					tdata->dst_sz,
-					info->out_chunk_sz);
 			tout_sz = tdata->dst_sz + HIZIP_PADDING;
 			ret = hw_stream_decompress(opts->alg_type,
 						   opts->block_size,
@@ -622,13 +619,11 @@ static void *hw_ifl_perf(void *arg)
 		return (void *)(uintptr_t)(-EINVAL);
 
 	for (i = 0; i < opts->compact_run_num; i++) {
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 		init_chunk_list(tdata->out_list, tdata->dst,
 				tdata->dst_sz,
 				info->out_chunk_sz);
 		ret = hw_inflate4(h_ifl, tdata->in_list, tdata->out_list, opts,
 				  &tdata->sem);
-		fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 		if (ret) {
 			printf("Fail to inflate by HW: %d\n", ret);
 			goto out;
@@ -815,7 +810,7 @@ int load_ilist(struct hizip_test_info *info, char *model)
 	size_t file_sz = 0, sum = 0;
 
 	if (!strcmp(model, "hw_ifl_perf")) {
-		if (opts->fd_ilist <= 0) {
+		if ((opts->fd_ilist <= 0) && !opts->is_stream) {
 			printf("Missing IN list file!\n");
 			return -EINVAL;
 		}
@@ -1091,7 +1086,6 @@ int test_hw(struct test_options *opts, char *model)
 	       zbuf, speed, usec, opts->block_size);
 	if (ifl_in_sz)
 		info.in_size = ifl_in_sz;
-	fprintf(stderr, "#%s, %d\n", __func__, __LINE__);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	usleep(1000);
@@ -1147,11 +1141,15 @@ int run_self_test(void)
 	f_ret |= test_hw(&opts, "hw_dfl_perf");
 	f_ret |= test_hw(&opts, "hw_ifl_perf");
 #else
-	opts.is_stream = 1;
 	opts.block_size = 8192;
 	opts.total_len = 1024 * 1024;
 	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
-	//f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
+	opts.is_stream = 1;
+	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
+	opts.is_stream = 0;
+	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
+	opts.is_stream = 1;
+	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
 #endif
 #if 0
 	for (i = 0; i < 1; i++) {
