@@ -427,7 +427,6 @@ int wd_do_comp_sync2(handle_t h_sess, struct wd_comp_req *req)
 {
 	struct wd_comp_sess *sess = (struct wd_comp_sess *)h_sess;
 	struct wd_comp_req strm_req;
-	__u32 total_avail_out = req->dst_len;
 	__u32 chunk = STREAM_CHUNK;
 	__u32 avail_in = req->src_len;
 	__u32 avail_out;
@@ -475,9 +474,6 @@ int wd_do_comp_sync2(handle_t h_sess, struct wd_comp_req *req)
 			}
 			dbg("do, strm start, in =%u, out_len =%u\n",
 			    strm_req.src_len, strm_req.dst_len);
-			if (req->dst_len + strm_req.src_len > total_avail_out) {
-				return -WD_ENOMEM;
-			}
 			strm_req.src_len = avail_in > chunk ? chunk : avail_in;
 			strm_req.dst_len = avail_out > chunk ? chunk : avail_out;
 			ret = wd_do_comp_strm(h_sess, &strm_req);
