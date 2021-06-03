@@ -376,6 +376,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 				printf("Fail to deflate by HW: %d\n", ret);
 				goto out;
 			}
+			printf("#%s, %d, src_len:%ld, tmp_sz:%d\n", __func__, __LINE__, tdata->src_sz, tmp_sz);
 			tout_sz = tdata->dst_sz + HIZIP_PADDING;
 			ret = hw_stream_decompress(opts->alg_type,
 						   opts->block_size,
@@ -388,6 +389,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 				printf("Fail to inflate by HW: %d\n", ret);
 				goto out;
 			}
+			printf("#%s, %d, tmp_sz:%d, tout_sz:%d\n", __func__, __LINE__, tmp_sz, tout_sz);
 			ret = calculate_md5(&tdata->md5, tdata->in_list->addr,
 					    tdata->in_list->size);
 			if (ret) {
@@ -1147,9 +1149,11 @@ int run_self_test(void)
 	opts.is_stream = 1;
 	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
 	opts.is_stream = 0;
-	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
+	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
+	//f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
 	opts.is_stream = 1;
-	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
+	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
+	//f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
 #endif
 #if 0
 	for (i = 0; i < 1; i++) {

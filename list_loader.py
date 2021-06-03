@@ -24,8 +24,14 @@ class listcontent(object):
         self.ofile.close()
 
     def deflate(self, olist, blk_sz):
-        data = self.ifile.read(blk_sz)
+        ifile_sz = os.path.getsize(self.ifile_nm)
+        count = (ifile_sz + int(blk_sz) - 1) / int(blk_sz)
+        print("deflate count", count)
+        # Create array
+        data = np.ndarray(count * 3, dtype=np.uint64)
         print(data)
+        entries = data.reshape(-1, 3)
+        print(entries)
 
     # Read block data from ifile by ilist. And inflate each block data.
     def inflate(self, ilist):
@@ -84,9 +90,6 @@ def main(argv):
                     sys.exit(1)
                 ilist = arg
             elif opt in ("--olist"):
-                if not os.path.isfile(arg):
-                    print("File does not exist:", arg)
-                    sys.exit(1)
                 olist = arg
             elif opt in ("--in"):
                 if not os.path.isfile(arg):
@@ -104,6 +107,7 @@ def main(argv):
         print('    list_loader --in <file> --out <file> --ilist <file>')
         sys.exit(2)
 
+    print(blk_sz)
     if blk_sz:
         sw_deflate(ifile, ofile, olist, blk_sz)
     else:
