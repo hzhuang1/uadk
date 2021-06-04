@@ -1139,8 +1139,11 @@ int hw_inflate4(handle_t h_ifl,
 		} while (ret == -WD_EBUSY);
 		if (ret)
 			goto out;
-		i++;
 		q->size = reqs[i].dst_len;
+		/* make sure olist has the same length with ilist */
+		if (!p->next)
+			q->next = NULL;
+		i++;
 	}
 	free(reqs);
 	return 0;
@@ -1927,6 +1930,90 @@ out:
 	return ret;
 }
 
+/*
+ * info->in_buf & info->out_buf should be allocated first.
+ * Thread 0 shares info->out_buf. Other threads need to create its own
+ * dst buffer.
+ */
+int create_send_tdata(struct test_options *opts,
+		      struct hizip_test_info *info
+		     )
+{
+	thread_data_t *tdata;
+	chunk_list_t *in_list, *out_list;
+	int i, j, num, ret;
+
+	if (!opts || !info || !info->in_chunk_sz || !info->out_chunk_sz)
+		return -EINVAL;
+	num = opts->thread_num;
+	info->send_tds = calloc(1, sizeof(pthread_t) * num);
+	if (!info->send_tds)
+		return -ENOMEM;
+	info->send_tnum = num;
+	info->tdatas = calloc(1, sizeof(thread_data_t) * num);
+	if (!info->tdatas) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	if (opts->is_stream) {
+		in_list = create_chunk_list(info->in_buf, info->in_size,
+					    info->in_size);
+	} else {
+		in_list = create_chunk_list(info->in_buf, info->in_size,
+					    info->in_chunk_sz);
+	}
+	if (!in_list) {
+		ret = -EINVAL;
+		goto out_in;
+	}
+	for (i = 0; i < num; i++) {
+		tdata = &info->tdatas[i];
+		/* src address is shared among threads */
+		tdata->tid = i;
+		tdata->src_sz = info->in_size;
+		tdata->src = info->in_buf;
+		tdata->in_list = in_list;
+		tdata->dst_sz = info->out_size;
+		tdata->dst = mmap_alloc(tdata->dst_sz);
+		if (!tdata->dst) {
+			ret = -ENOMEM;
+			goto out_dst;
+		}
+		memset(tdata->dst, 0, tdata->dst_sz);
+		if (opts->is_stream) {
+			out_list = create_chunk_list(tdata->dst,
+						     tdata->dst_sz,
+						     tdata->dst_sz);
+		} else {
+			out_list = create_chunk_list(tdata->dst,
+						     tdata->dst_sz,
+						     info->out_chunk_sz);
+		}
+		tdata->out_list = out_list;
+		if (!tdata->out_list) {
+			ret = -EINVAL;
+			goto out_list;
+		}
+		calculate_md5(&tdata->md5, tdata->src, tdata->src_sz);
+		tdata->info = info;
+	}
+	return 0;
+out_list:
+	mmap_free(tdata->dst, tdata->dst_sz);
+out_dst:
+	for (j = 0; j < i; j++) {
+		pthread_cancel(info->send_tds[j]);
+		free_chunk_list(info->tdatas[j].out_list);
+		mmap_free(info->tdatas[j].dst, info->tdatas[j].dst_sz);
+	}
+	free_chunk_list(in_list);
+out_in:
+	free(info->tdatas);
+out:
+	free(info->send_tds);
+	return ret;
+}
+
 int create_poll_threads(struct hizip_test_info *info,
 			void *(*poll_thread_func)(void *arg),
 			int num)
@@ -2007,6 +2094,44 @@ out:
 	return ret;
 }
 
+int create_poll_tdata(struct test_options *opts,
+		      struct hizip_test_info *info,
+		      int poll_num
+		     )
+{
+	thread_data_t *tdatas;
+	int i, j, ret;
+
+	if (opts->sync_mode == 0)
+		return 0;
+	else if (poll_num <= 0)
+		return -EINVAL;
+	info->poll_tnum = poll_num;
+	info->poll_tds = calloc(1, sizeof(pthread_t) * poll_num);
+	if (!info->poll_tds)
+		return -ENOMEM;
+	tdatas = calloc(1, sizeof(thread_data_t) * poll_num);
+	if (!tdatas) {
+		ret = -ENOMEM;
+		goto out;
+	}
+	for (i = 0; i < poll_num; i++) {
+		tdatas[i].tid = i;
+		tdatas[i].info = info;
+		ret = sem_init(&tdatas[i].sem, 0, 0);
+		if (ret < 0)
+			goto out_sem;
+	}
+	return 0;
+out_sem:
+	for (j = 0; j < i; j++)
+		sem_destroy(&tdatas[i].sem);
+	free(tdatas);
+out:
+	free(info->poll_tds);
+	return ret;
+}
+
 int attach_threads(struct test_options *opts, struct hizip_test_info *info)
 {
 	int i, ret;
@@ -2026,6 +2151,63 @@ int attach_threads(struct test_options *opts, struct hizip_test_info *info)
 			fprintf(stderr, "Fail on send thread with %d\n", ret);
 	}
 	return (int)(uintptr_t)tret;
+}
+
+int attach2_threads(struct test_options *opts,
+		    struct hizip_test_info *info,
+		    void *(*send_thread_func)(void *arg),
+		    void *(*poll_thread_func)(void *arg)
+		   )
+{
+	int i, j, ret, num;
+	void *tret;
+	pthread_attr_t attr;
+
+	num = opts->thread_num;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	for (i = 0; i < num; i++) {
+		ret = pthread_create(&info->send_tds[i], &attr,
+				     send_thread_func, &info->tdatas[i]);
+		if (ret < 0) {
+			printf("Fail to create send thread %d (%d)\n", i, ret);
+			goto out;
+		}
+	}
+	if (opts->sync_mode) {
+		for (i = 0; i < opts->poll_num; i++) {
+			ret = pthread_create(&info->poll_tds[i], &attr,
+					     poll_thread_func,
+					     &info->tdatas[i]);
+			if (ret < 0) {
+				printf("Fail to create poll thread %d (%d)\n",
+					i, ret);
+				goto out_poll;
+			}
+		}
+		for (i = 0; i < info->poll_tnum; i++) {
+			ret = pthread_join(info->poll_tds[i], NULL);
+			if (ret < 0)
+				fprintf(stderr, "Fail on poll thread with %d\n",
+					ret);
+		}
+	}
+	for (i = 0; i < info->send_tnum; i++) {
+		ret = pthread_join(info->send_tds[i], &tret);
+		if (ret < 0)
+			fprintf(stderr, "Fail on send thread with %d\n", ret);
+	}
+	pthread_attr_destroy(&attr);
+	return (int)(uintptr_t)tret;
+out_poll:
+	for (j = 0; j < i; j++)
+		pthread_cancel(info->poll_tds[j]);
+	i = opts->thread_num;
+out:
+	for (j = 0; j < i; j++)
+		pthread_cancel(info->send_tds[j]);
+	pthread_attr_destroy(&attr);
+	return ret;
 }
 
 /*

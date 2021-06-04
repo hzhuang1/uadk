@@ -213,11 +213,12 @@ sw_dfl_hw_ifl()
 
 	# Only gzip compress and hardware decompress
 	sw_blk_deflate origin /tmp/ori.gz gzip 8192
-	hw_blk_inflate /tmp/ori.gz origin gzip
+	hw_blk_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5
+	echo "BLOCK inflate for RANDOM"
 
-	sw_strm_deflate origin /tmp/ori.gz gzip
-	hw_strm_inflate /tmp/ori.gz origin gzip 8192
+	sw_strm_deflate origin /tmp/ori.gz gzip 8192
+	hw_strm_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5
 
 	# Use existed text file. It's not in alignment.
@@ -226,7 +227,7 @@ sw_dfl_hw_ifl()
 	md5sum origin > ori.md5
 
 	# Only gzip compress and hardware decompress
-	sw_strm_deflate origin /tmp/ori.gz gzip
+	sw_strm_deflate origin /tmp/ori.gz gzip 8192
 	hw_strm_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5
 }

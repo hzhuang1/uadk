@@ -626,6 +626,8 @@ static void *hw_ifl_perf(void *arg)
 				info->out_chunk_sz);
 		ret = hw_inflate4(h_ifl, tdata->in_list, tdata->out_list, opts,
 				  &tdata->sem);
+		printf("#%s, %d, in size:%ld, out size:%ld\n",
+			__func__, __LINE__, tdata->in_list->size, tdata->out_list->size);
 		if (ret) {
 			printf("Fail to inflate by HW: %d\n", ret);
 			goto out;
@@ -810,6 +812,7 @@ int load_ilist(struct hizip_test_info *info, char *model)
 	thread_data_t *tdata = &info->tdatas[0];
 	chunk_list_t *p;
 	size_t file_sz = 0, sum = 0;
+	void *addr;
 
 	if (!strcmp(model, "hw_ifl_perf")) {
 		if ((opts->fd_ilist <= 0) && !opts->is_stream) {
@@ -817,16 +820,18 @@ int load_ilist(struct hizip_test_info *info, char *model)
 			return -EINVAL;
 		}
 		p = tdata->in_list;
+		addr = info->in_buf;
 		while (p) {
 			file_sz = read(opts->fd_ilist, p,
 					sizeof(chunk_list_t));
 			if (file_sz < 0)
 				return -EFAULT;
-			/* next field is obsolete */
+			p->addr = addr;
+			sum += file_sz;
 			if (p->next)
 				p->next = p + 1;
+			addr += p->size;
 			p = p->next;
-			sum += file_sz;
 		}
 	}
 	return (int)sum;
@@ -861,6 +866,7 @@ int store_olist(struct hizip_test_info *info, char *model)
 	size_t file_sz = 0, sum = 0;
 
 	if ((opts->fd_olist >= 0) && !opts->is_stream) {
+		/* compress with BLOCK */
 		p = tdata->out_list;
 		while (p) {
 			file_sz = write(opts->fd_olist, p,
@@ -874,7 +880,17 @@ int store_olist(struct hizip_test_info *info, char *model)
 			p = p->next;
 			sum += file_sz;
 		}
-		fprintf(stderr, "#%s, %d, sum:%lx\n", __func__, __LINE__, sum);
+	} else if (!opts->is_stream) {
+		/* decompress with BLOCK */
+		p = tdata->out_list;
+		while (p) {
+			file_sz = write(opts->fd_out, p->addr,
+					p->size);
+			if (file_sz < p->size)
+				return -EFAULT;
+			p = p->next;
+			sum += file_sz;
+		}
 	} else if (opts->is_stream) {
 		p = tdata->out_list;
 		printf("#%s, %d, addr:%p, size:%ld\n", __func__, __LINE__, p->addr, p->size);
@@ -1008,17 +1024,16 @@ int test_hw(struct test_options *opts, char *model)
 		goto out_src;
 	}
 	memset(info.in_buf, 0, info.in_size);
-	ret = create_send3_threads(opts, &info, func);
+	ret = create_send_tdata(opts, &info);
 	if (ret)
 		goto out_send;
-	ret = create_poll2_threads(opts, &info, poll2_thread_func,
-				   opts->poll_num);
+	ret = create_poll_tdata(opts, &info, opts->poll_num);
 	if (ret)
 		goto out_poll;
 	if (opts->is_file) {
 		/* in_list is created by create_send3_threads(). */
-		ret = load_ilist(&info, model);
 		ret = load_file_data(&info);
+		ret = load_ilist(&info, model);
 		fprintf(stderr, "#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 		if (ret < 0)
 			goto out_buf;
@@ -1048,8 +1063,9 @@ int test_hw(struct test_options *opts, char *model)
 		} else
 			gen_random_data(info.in_buf, info.in_size);
 	}
+	printf("#%s, %d\n", __func__, __LINE__);
 	gettimeofday(&start_tvl, NULL);
-	ret = attach_threads(opts, &info);
+	ret = attach2_threads(opts, &info, func, poll2_thread_func);
 	fprintf(stderr, "#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 	if (ret)
 		goto out_poll;

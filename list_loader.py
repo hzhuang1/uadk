@@ -29,9 +29,35 @@ class listcontent(object):
         print("deflate count", count)
         # Create array
         data = np.ndarray(count * 3, dtype=np.uint64)
-        print(data)
         entries = data.reshape(-1, 3)
-        print(entries)
+        i = 0
+        while i < count:
+            # Each block of data is stored in temporary file that is used
+            # by gzip.
+            f = tempfile.NamedTemporaryFile(delete=False)
+            blk = self.ifile.read(int(blk_sz))
+            f.write(blk)
+            f.close()
+            of = tempfile.NamedTemporaryFile(delete=False)
+            of.close()
+            os.system("gzip -c --fast < %s > %s" % (f.name, of.name))
+            if not i:
+                os.system("cat %s > %s" % (of.name, self.ofile_nm))
+            else:
+                os.system("cat %s >> %s" % (of.name, self.ofile_nm))
+            # entries[i][0] should be the address of output buffer.
+            # But the output is file now, not buffer. So fill it with
+            # any non-zero value.
+            entries[i][0] = 1
+            entries[i][1] = os.path.getsize(of.name)
+            if i == count - 1:
+                entries[i][2] = 0
+            else:
+                entries[i][2] = 1
+            i += 1
+            os.remove(f.name)
+            os.remove(of.name)
+        entries.tofile(olist)
 
     # Read block data from ifile by ilist. And inflate each block data.
     def inflate(self, ilist):

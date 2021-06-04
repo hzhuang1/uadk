@@ -203,6 +203,9 @@ int create_send3_threads(struct test_options *opts,
 			 struct hizip_test_info *info,
 			 void *(*send_thread_func)(void *arg)
 			);
+int create_send_tdata(struct test_options *opts,
+		      struct hizip_test_info *info
+		     );
 int create_poll_threads(struct hizip_test_info *info,
 			void *(*poll_thread_func)(void *arg),
 			int num);
@@ -211,8 +214,17 @@ int create_poll2_threads(struct test_options *opts,
 			 void *(*send_thread_func)(void *arg),
 			 int poll_num
 			);
+int create_poll_tdata(struct test_options *opts,
+		      struct hizip_test_info *info,
+		      int poll_num
+		     );
 int attach_threads(struct test_options *opts,
 		   struct hizip_test_info *info);
+int attach2_threads(struct test_options *opts,
+		    struct hizip_test_info *info,
+		    void *(*send_thread_func)(void *arg),
+		    void *(*poll_thread_func)(void *arg)
+		   );
 void free_threads(struct hizip_test_info *info);
 int init_ctx_config(struct test_options *opts,
 		    void *priv,
