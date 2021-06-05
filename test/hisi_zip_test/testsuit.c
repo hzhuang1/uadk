@@ -918,7 +918,7 @@ int test_hw(struct test_options *opts, char *model)
 	char zbuf[120];
 	int ret, zbuf_idx, ifl_flag = 0;
 	void *(*func)(void *);
-	size_t tbuf_sz = 0, /*out_sz = 0, */ifl_in_sz = 0;
+	size_t tbuf_sz = 0; /*out_sz = 0, ifl_in_sz = 0;*/
 	void *tbuf = NULL;
 	//ssize_t file_sz;
 	struct stat statbuf;
@@ -986,7 +986,7 @@ int test_hw(struct test_options *opts, char *model)
 				   opts->sync_mode ? "ASYNC" : "SYNC",
 				   opts->is_stream ? "STREAM" : "BLOCK");
 		ifl_flag = 1;
-		ifl_in_sz = info.in_size;
+		//ifl_in_sz = info.in_size;
 	} else if (!strcmp(model, "hw_ifl_perf2")) {
 		func = hw_ifl_perf2;
 		info.in_size = opts->total_len * EXPANSION_RATIO;
@@ -1000,6 +1000,7 @@ int test_hw(struct test_options *opts, char *model)
 		ret = -EINVAL;
 		goto out;
 	}
+	printf("#%s, %d, in_size:%ld\n", __func__, __LINE__, info.in_size);
 
 	info.list = get_dev_list(opts, 1);
 	if (!info.list) {
@@ -1024,12 +1025,13 @@ int test_hw(struct test_options *opts, char *model)
 			}
 		}
 	}
+	printf("#%s, %d, in_size:%ld, out_size:%ld\n", __func__, __LINE__, info.in_size, info.out_size);
 	info.in_buf = mmap_alloc(info.in_size);
 	if (!info.in_buf) {
 		ret = -ENOMEM;
 		goto out_src;
 	}
-	memset(info.in_buf, 0, info.in_size);
+	//memset(info.in_buf, 0, info.in_size);
 	ret = create_send_tdata(opts, &info);
 	if (ret)
 		goto out_send;
@@ -1111,10 +1113,14 @@ int test_hw(struct test_options *opts, char *model)
 	}
 	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       zbuf, speed, usec, opts->block_size);
+	/*
 	if (ifl_in_sz)
 		info.in_size = ifl_in_sz;
+		*/
+	printf("#%s, %d, in_size:%ld, out_size:%ld\n", __func__, __LINE__, info.in_size, info.out_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
+	wd_free_list_accels(info.list);
 	usleep(1000);
 	return 0;
 out_poll:
@@ -1124,8 +1130,10 @@ out_dfl:
 	if (ifl_flag && tbuf && tbuf_sz)
 		mmap_free(tbuf, tbuf_sz);
 out_buf:
+	/*
 	if (ifl_in_sz)
 		info.in_size = ifl_in_sz;
+		*/
 out_src:
 	uninit_config(&info, sched);
 out_cfg:
