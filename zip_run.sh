@@ -220,13 +220,18 @@ sw_dfl_hw_ifl()
 	sw_strm_deflate origin /tmp/ori.gz gzip 8192
 	hw_strm_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5
+	echo "STREAM inflate for RANDOM"
 
 	# Use existed text file. It's not in alignment.
 	${RM} -f origin /tmp/ori.gz ori.md5
 	prepare_src_file $1
 	md5sum origin > ori.md5
 
-	# Only gzip compress and hardware decompress
+	sw_blk_deflate origin /tmp/ori.gz gzip 8192
+	hw_blk_inflate /tmp/ori.gz origin gzip -b 8192
+	md5sum -c ori.md5
+	echo "BLOCK inflate for file"
+
 	sw_strm_deflate origin /tmp/ori.gz gzip 8192
 	hw_strm_inflate /tmp/ori.gz origin gzip -b 8192
 	md5sum -c ori.md5

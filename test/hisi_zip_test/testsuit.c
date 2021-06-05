@@ -3,7 +3,7 @@
 #include "test_lib.h"
 
 /* PADDING could avoid blocking in HW inflation */
-#define HIZIP_PADDING	4
+#define HIZIP_PADDING	0
 
 static void *sw_dfl_sw_ifl(void *arg)
 {
@@ -607,7 +607,9 @@ static void *hw_ifl_perf(void *arg)
 				printf("Fail to inflate by HW: %d\n", ret);
 				return (void *)(uintptr_t)ret;
 			}
-			ret = tout_sz;
+			tdata->out_list->addr = tdata->dst;
+			tdata->out_list->size = tout_sz;
+			tdata->out_list->next = NULL;
 		}
 		return NULL;
 	}
@@ -811,27 +813,30 @@ int load_ilist(struct hizip_test_info *info, char *model)
 	struct test_options *opts = info->opts;
 	thread_data_t *tdata = &info->tdatas[0];
 	chunk_list_t *p;
-	size_t file_sz = 0, sum = 0;
+	size_t sum = 0;
+	ssize_t file_sz = 0;
 	void *addr;
 
 	if (!strcmp(model, "hw_ifl_perf")) {
-		if ((opts->fd_ilist <= 0) && !opts->is_stream) {
-			printf("Missing IN list file!\n");
-			return -EINVAL;
-		}
-		p = tdata->in_list;
-		addr = info->in_buf;
-		while (p) {
-			file_sz = read(opts->fd_ilist, p,
-					sizeof(chunk_list_t));
-			if (file_sz < 0)
-				return -EFAULT;
-			p->addr = addr;
-			sum += file_sz;
-			if (p->next)
-				p->next = p + 1;
-			addr += p->size;
-			p = p->next;
+		if (!opts->is_stream) {
+			if (opts->fd_ilist < 0) {
+				printf("Missing IN list file!\n");
+				return -EINVAL;
+			}
+			p = tdata->in_list;
+			addr = info->in_buf;
+			while (p) {
+				file_sz = read(opts->fd_ilist, p,
+						sizeof(chunk_list_t));
+				if (file_sz < 0)
+					return -EFAULT;
+				p->addr = addr;
+				sum += file_sz;
+				if (p->next)
+					p->next = p + 1;
+				addr += p->size;
+				p = p->next;
+			}
 		}
 	}
 	return (int)sum;
@@ -865,40 +870,41 @@ int store_olist(struct hizip_test_info *info, char *model)
 	chunk_list_t *p;
 	size_t file_sz = 0, sum = 0;
 
-	if ((opts->fd_olist >= 0) && !opts->is_stream) {
-		/* compress with BLOCK */
-		p = tdata->out_list;
-		while (p) {
-			file_sz = write(opts->fd_olist, p,
-					sizeof(chunk_list_t));
-			if (file_sz < sizeof(chunk_list_t))
-				return -EFAULT;
-			file_sz = write(opts->fd_out, p->addr,
-					p->size);
-			if (file_sz < p->size)
-				return -EFAULT;
-			p = p->next;
-			sum += file_sz;
-		}
-	} else if (!opts->is_stream) {
-		/* decompress with BLOCK */
-		p = tdata->out_list;
-		while (p) {
-			file_sz = write(opts->fd_out, p->addr,
-					p->size);
-			if (file_sz < p->size)
-				return -EFAULT;
-			p = p->next;
-			sum += file_sz;
+	if (!opts->is_stream) {
+		if (opts->fd_olist >= 0) {
+			/* compress with BLOCK */
+			p = tdata->out_list;
+			while (p) {
+				file_sz = write(opts->fd_olist, p,
+						sizeof(chunk_list_t));
+				if (file_sz < sizeof(chunk_list_t))
+					return -EFAULT;
+				file_sz = write(opts->fd_out, p->addr,
+						p->size);
+				if (file_sz < p->size)
+					return -EFAULT;
+				p = p->next;
+				sum += file_sz;
+			}
+		} else {
+			/* decompress with BLOCK */
+			p = tdata->out_list;
+			while (p) {
+				file_sz = write(opts->fd_out, p->addr,
+						p->size);
+				if (file_sz < p->size)
+					return -EFAULT;
+				p = p->next;
+				sum += file_sz;
+			}
 		}
 	} else if (opts->is_stream) {
 		p = tdata->out_list;
-		printf("#%s, %d, addr:%p, size:%ld\n", __func__, __LINE__, p->addr, p->size);
+		printf("#%s, %d, addr:%p, size:%ld-0x%lx\n", __func__, __LINE__, p->addr, p->size, p->size);
 		file_sz = write(opts->fd_out, p->addr, p->size);
 		if (file_sz < p->size)
 			return -EFAULT;
 		sum = file_sz;
-		fprintf(stderr, "#%s, %d, sum:%lx\n", __func__, __LINE__, sum);
 	}
 	return (int)sum;
 }
@@ -1033,8 +1039,11 @@ int test_hw(struct test_options *opts, char *model)
 	if (opts->is_file) {
 		/* in_list is created by create_send3_threads(). */
 		ret = load_file_data(&info);
+		printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
+		if (ret < 0)
+			goto out_buf;
 		ret = load_ilist(&info, model);
-		fprintf(stderr, "#%s, %d, ret:%d\n", __func__, __LINE__, ret);
+		printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 		if (ret < 0)
 			goto out_buf;
 	} else {
