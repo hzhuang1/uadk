@@ -540,39 +540,6 @@ static void *hw_dfl_perf(void *arg)
 		}
 	}
 	wd_comp_free_sess(h_dfl);
-#if 0
-	/* Thread 0 shares output buf with info->out_buf. */
-	if (tdata->tid)
-		mmap_free(tdata->dst, tdata->dst_sz);
-	else {
-		/* put in in hw_dfl_perf() temporarily */
-		if (opts->is_file && opts->fd_out && opts->is_stream) {
-			file_sz = write(opts->fd_out, tdata->dst, out_sz);
-			if (file_sz < out_sz) {
-				printf("Expect to write %ld bytes. "
-				       "But only write %ld bytes!\n",
-				       out_sz, file_sz);
-				goto out_wrt;
-			}
-		} else if (opts->is_file && opts->fd_out) {
-			p = list;
-			/* write output from thread 0 to file */
-			for (i = 0; i < HIZIP_CHUNK_LIST_ENTRIES; i++) {
-				file_sz = write(opts->fd_out, p->addr, p->size);
-				if (file_sz < p->size) {
-					printf("Expect to write %ld bytes. "
-					       "But only write %ld bytes!\n",
-					       p->size, file_sz);
-					goto out_wrt;
-				}
-				p = p->next;
-				if (!p->next)
-					break;
-			}
-		}
-		info->total_out = out_sz;
-	}
-#endif
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
@@ -628,47 +595,12 @@ static void *hw_ifl_perf(void *arg)
 				info->out_chunk_sz);
 		ret = hw_inflate4(h_ifl, tdata->in_list, tdata->out_list, opts,
 				  &tdata->sem);
-		printf("#%s, %d, in size:%ld, out size:%ld\n",
-			__func__, __LINE__, tdata->in_list->size, tdata->out_list->size);
 		if (ret) {
 			printf("Fail to inflate by HW: %d\n", ret);
 			goto out;
 		}
 	}
 	wd_comp_free_sess(h_ifl);
-#if 0
-	/* Thread 0 shares output buf with info->out_buf. */
-	if (tdata->tid)
-		mmap_free(tdata->dst, tdata->dst_sz);
-	else {
-		/* put in in hw_ifl_perf() temporarily */
-		if (opts->is_file && opts->fd_out && opts->is_stream) {
-			file_sz = write(opts->fd_out, tdata->dst, out_sz);
-			if (file_sz < out_sz) {
-				printf("Expect to write %ld bytes. "
-				       "But only write %ld bytes!\n",
-				       out_sz, file_sz);
-				goto out_wrt;
-			}
-		} else if (opts->is_file && opts->fd_out) {
-			p = list;
-			/* write output from thread 0 to file */
-			for (i = 0; i < HIZIP_CHUNK_LIST_ENTRIES; i++) {
-				file_sz = write(opts->fd_out, p->addr, p->size);
-				if (file_sz < p->size) {
-					printf("Expect to write %ld bytes. "
-					       "But only write %ld bytes!\n",
-					       p->size, file_sz);
-					goto out_wrt;
-				}
-				p = p->next;
-				if (!p->next)
-					break;
-			}
-		}
-		info->total_out = out_sz;
-	}
-#endif
 	/* mark sending thread to end */
 	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
 	return NULL;
@@ -900,7 +832,6 @@ int store_olist(struct hizip_test_info *info, char *model)
 		}
 	} else if (opts->is_stream) {
 		p = tdata->out_list;
-		printf("#%s, %d, addr:%p, size:%ld-0x%lx\n", __func__, __LINE__, p->addr, p->size, p->size);
 		file_sz = write(opts->fd_out, p->addr, p->size);
 		if (file_sz < p->size)
 			return -EFAULT;
@@ -1000,7 +931,6 @@ int test_hw(struct test_options *opts, char *model)
 		ret = -EINVAL;
 		goto out;
 	}
-	printf("#%s, %d, in_size:%ld\n", __func__, __LINE__, info.in_size);
 
 	info.list = get_dev_list(opts, 1);
 	if (!info.list) {
@@ -1025,13 +955,11 @@ int test_hw(struct test_options *opts, char *model)
 			}
 		}
 	}
-	printf("#%s, %d, in_size:%ld, out_size:%ld\n", __func__, __LINE__, info.in_size, info.out_size);
 	info.in_buf = mmap_alloc(info.in_size);
 	if (!info.in_buf) {
 		ret = -ENOMEM;
 		goto out_src;
 	}
-	//memset(info.in_buf, 0, info.in_size);
 	ret = create_send_tdata(opts, &info);
 	if (ret)
 		goto out_send;
@@ -1041,11 +969,9 @@ int test_hw(struct test_options *opts, char *model)
 	if (opts->is_file) {
 		/* in_list is created by create_send3_threads(). */
 		ret = load_file_data(&info);
-		printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 		if (ret < 0)
 			goto out_buf;
 		ret = load_ilist(&info, model);
-		printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 		if (ret < 0)
 			goto out_buf;
 	} else {
@@ -1070,33 +996,17 @@ int test_hw(struct test_options *opts, char *model)
 			if (ret)
 				goto out_dfl;
 			mmap_free(tbuf, tbuf_sz);
-			//info.in_size = out_sz;
 		} else
 			gen_random_data(info.in_buf, info.in_size);
 	}
-	printf("#%s, %d\n", __func__, __LINE__);
 	gettimeofday(&start_tvl, NULL);
 	ret = attach2_threads(opts, &info, func, poll2_thread_func);
-	fprintf(stderr, "#%s, %d, ret:%d\n", __func__, __LINE__, ret);
 	if (ret)
 		goto out_poll;
 	gettimeofday(&end_tvl, NULL);
 	timersub(&end_tvl, &start_tvl, &start_tvl);
-#if 0
-	if (opts->is_file && opts->fd_out) {
-		/* write output from thread 0 to file */
-		file_sz = write(opts->fd_out, info.out_buf, info.total_out);
-		if (file_sz < info.out_size) {
-			printf("Expect to write %ld bytes. "
-			       "But only write %ld bytes!\n",
-			       info.out_size, file_sz);
-			goto out_poll;
-		}
-	}
-#else
 	if (opts->is_file)
 		store_olist(&info, model);
-#endif
 
 	usec = (double)(start_tvl.tv_sec * 1000000 + start_tvl.tv_usec);
 	ilen = opts->total_len * opts->thread_num * opts->compact_run_num;
@@ -1117,7 +1027,6 @@ int test_hw(struct test_options *opts, char *model)
 	if (ifl_in_sz)
 		info.in_size = ifl_in_sz;
 		*/
-	printf("#%s, %d, in_size:%ld, out_size:%ld\n", __func__, __LINE__, info.in_size, info.out_size);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	wd_free_list_accels(info.list);
