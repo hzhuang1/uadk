@@ -281,6 +281,14 @@ int hw_inflate4(handle_t h_ifl,
 		chunk_list_t *out_list,
 		struct test_options *opts,
 		sem_t *sem);
+int hw_deflate5(handle_t h_dfl,
+		chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		thread_data_t *tdata);
+int hw_inflate5(handle_t h_ifl,
+		chunk_list_t *in_list,
+		chunk_list_t *out_list,
+		thread_data_t *tdata);
 
 /* for block interface */
 int hw_blk_compress(int alg_type, int blksize, __u8 data_fmt, void *priv,

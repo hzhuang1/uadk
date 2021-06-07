@@ -376,7 +376,6 @@ static void *hw_dfl_hw_ifl(void *arg)
 				printf("Fail to deflate by HW: %d\n", ret);
 				goto out;
 			}
-			printf("#%s, %d, src_len:%ld, tmp_sz:%d\n", __func__, __LINE__, tdata->src_sz, tmp_sz);
 			tout_sz = tdata->dst_sz;
 			ret = hw_stream_decompress(opts->alg_type,
 						   opts->block_size,
@@ -389,7 +388,6 @@ static void *hw_dfl_hw_ifl(void *arg)
 				printf("Fail to inflate by HW: %d\n", ret);
 				goto out;
 			}
-			printf("#%s, %d, tmp_sz:%d, tout_sz:%d\n", __func__, __LINE__, tmp_sz, tout_sz);
 			ret = calculate_md5(&tdata->md5, tdata->in_list->addr,
 					    tdata->in_list->size);
 			if (ret) {
@@ -608,7 +606,7 @@ out:
 }
 
 /* BATCH mode is used */
-static void *hw_dfl_perf2(void *arg)
+void *hw_dfl_perf2(void *arg)
 {
 	thread_data_t *tdata = (thread_data_t *)arg;
 	struct hizip_test_info *info = tdata->info;
@@ -650,7 +648,7 @@ out:
 }
 
 /* BATCH mode is used */
-static void *hw_ifl_perf2(void *arg)
+void *hw_ifl_perf2(void *arg)
 {
 	thread_data_t *tdata = (thread_data_t *)arg;
 	struct hizip_test_info *info = tdata->info;
@@ -687,6 +685,126 @@ static void *hw_ifl_perf2(void *arg)
 out:
 	if (tdata->tid)
 		mmap_free(tdata->dst, tdata->dst_sz);
+	wd_comp_free_sess(h_ifl);
+	return (void *)(uintptr_t)(ret);
+}
+
+/* BATCH mode is used */
+static void *hw_dfl_perf3(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_dfl;
+	int i, ret;
+	uint32_t tout_sz;
+
+	if (opts->is_stream) {
+		for (i = 0; i < opts->compact_run_num; i++) {
+			tout_sz = tdata->dst_sz;
+			ret = hw_stream_compress(opts->alg_type,
+						 opts->block_size,
+						 opts->data_fmt,
+						 tdata->dst,
+						 &tout_sz,
+						 tdata->src,
+						 tdata->src_sz);
+			if (ret) {
+				printf("Fail to deflate by HW: %d\n", ret);
+				return (void *)(uintptr_t)ret;
+			}
+		}
+		tdata->out_list->addr = tdata->dst;
+		tdata->out_list->size = tout_sz;
+		tdata->out_list->next = NULL;
+		return NULL;
+	}
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_COMPRESS;
+
+	h_dfl = wd_comp_alloc_sess(&setup);
+	if (!h_dfl)
+		return (void *)(uintptr_t)(-EINVAL);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		init_chunk_list(tdata->out_list, tdata->dst,
+				tdata->dst_sz,
+				info->out_chunk_sz);
+		ret = hw_deflate5(h_dfl, tdata->in_list, tdata->out_list,
+				  tdata);
+		if (ret) {
+			printf("Fail to deflate by HW: %d\n", ret);
+			goto out;
+		}
+	}
+	wd_comp_free_sess(h_dfl);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
+	return NULL;
+out:
+	wd_comp_free_sess(h_dfl);
+	return (void *)(uintptr_t)(ret);
+}
+
+/* BATCH mode is used */
+static void *hw_ifl_perf3(void *arg)
+{
+	thread_data_t *tdata = (thread_data_t *)arg;
+	struct hizip_test_info *info = tdata->info;
+	struct test_options *opts = info->opts;
+	struct wd_comp_sess_setup setup = {0};
+	handle_t h_ifl;
+	int i, ret;
+	uint32_t tout_sz;
+
+	if (opts->is_stream) {
+		for (i = 0; i < opts->compact_run_num; i++) {
+			tout_sz = tdata->dst_sz;
+			ret = hw_stream_decompress(opts->alg_type,
+						   opts->block_size,
+						   opts->data_fmt,
+						   tdata->dst,
+						   &tout_sz,
+						   tdata->src,
+						   tdata->src_sz);
+			if (ret) {
+				printf("Fail to inflate by HW: %d\n", ret);
+				return (void *)(uintptr_t)ret;
+			}
+			tdata->out_list->addr = tdata->dst;
+			tdata->out_list->size = tout_sz;
+			tdata->out_list->next = NULL;
+		}
+		return NULL;
+	}
+
+        setup.alg_type = opts->alg_type;
+        setup.mode = opts->sync_mode ? CTX_MODE_ASYNC : CTX_MODE_SYNC;
+        setup.op_type = WD_DIR_DECOMPRESS;
+
+	h_ifl = wd_comp_alloc_sess(&setup);
+	if (!h_ifl)
+		return (void *)(uintptr_t)(-EINVAL);
+
+	for (i = 0; i < opts->compact_run_num; i++) {
+		init_chunk_list(tdata->out_list, tdata->dst,
+				tdata->dst_sz,
+				info->out_chunk_sz);
+		ret = hw_inflate5(h_ifl, tdata->in_list, tdata->out_list,
+				  tdata);
+		if (ret) {
+			printf("Fail to inflate by HW: %d\n", ret);
+			goto out;
+		}
+	}
+	wd_comp_free_sess(h_ifl);
+	/* mark sending thread to end */
+	__atomic_add_fetch(&sum_thread_end, 1, __ATOMIC_ACQ_REL);
+	return NULL;
+out:
 	wd_comp_free_sess(h_ifl);
 	return (void *)(uintptr_t)(ret);
 }
@@ -905,10 +1023,12 @@ int test_hw(struct test_options *opts, char *model)
 		zbuf_idx = sprintf(zbuf, "HW %s %s deflate",
 				   opts->sync_mode ? "ASYNC" : "SYNC",
 				   opts->is_stream ? "STREAM" : "BLOCK");
-	} else if (!strcmp(model, "hw_dfl_perf2")) {
-		func = hw_dfl_perf2;
+	} else if (!strcmp(model, "hw_dfl_perf3")) {
+		func = hw_dfl_perf3;
 		info.in_size = opts->total_len;
 		info.out_size = opts->total_len * EXPANSION_RATIO;
+		info.in_chunk_sz = opts->block_size;
+		info.out_chunk_sz = opts->block_size * EXPANSION_RATIO;
 		zbuf_idx = sprintf(zbuf, "HW %s %s deflate",
 				   opts->sync_mode ? "ASYNC" : "SYNC",
 				   opts->is_stream ? "STREAM" : "BLOCK");
@@ -922,10 +1042,12 @@ int test_hw(struct test_options *opts, char *model)
 				   opts->sync_mode ? "ASYNC" : "SYNC",
 				   opts->is_stream ? "STREAM" : "BLOCK");
 		ifl_flag = 1;
-	} else if (!strcmp(model, "hw_ifl_perf2")) {
-		func = hw_ifl_perf2;
+	} else if (!strcmp(model, "hw_ifl_perf3")) {
+		func = hw_ifl_perf3;
 		info.in_size = opts->total_len * EXPANSION_RATIO;
 		info.out_size = opts->total_len;
+		info.in_chunk_sz = opts->block_size;
+		info.out_chunk_sz = opts->block_size * INFLATION_RATIO;
 		zbuf_idx = sprintf(zbuf, "HW %s %s inflate",
 				   opts->sync_mode ? "ASYNC" : "SYNC",
 				   opts->is_stream ? "STREAM" : "BLOCK");
@@ -1062,52 +1184,20 @@ int run_self_test(void)
 	struct test_options opts = {
 		.alg_type		= WD_ZLIB,
 		.sync_mode		= 0,
-		.thread_num		= 1,
-		//.thread_num		= 16,
+		.thread_num		= 16,
 		.q_num			= 16,
-		.block_size		= 1024,
-		//.total_len		= 1024 * 2,
-		//.block_size		= 8192,
+		.block_size		= 8192,
 		.total_len		= 8192 * 10,
-		//.compact_run_num	= 1000,
-		.compact_run_num	= 1,
+		.compact_run_num	= 1000,
 	};
-	int /*i, */f_ret = 0;
+	int i, f_ret = 0;
 
 	printf("Start to run self test!\n");
-#if 1
-	f_ret |= test_sw_dfl_sw_ifl(&opts);
-	opts.is_stream = 0;
-	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
-	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
-	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
-	f_ret |= test_hw(&opts, "hw_dfl_perf");
-	f_ret |= test_hw(&opts, "hw_ifl_perf");
-	opts.is_stream = 1;
-	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
-	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
-	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
-	f_ret |= test_hw(&opts, "hw_dfl_perf");
-	f_ret |= test_hw(&opts, "hw_ifl_perf");
-#else
-	opts.block_size = 8192;
-	opts.total_len = 1024 * 1024;
-	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
-	opts.is_stream = 1;
-	f_ret |= test_hw(&opts, "hw_dfl_sw_ifl");
-	opts.is_stream = 0;
-	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
-	//f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
-	opts.is_stream = 1;
-	f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
-	//f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");
-#endif
-#if 0
 	for (i = 0; i < 1; i++) {
 		opts.sync_mode = 0;
 		opts.is_stream = 1;
-		//f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
-		//f_ret |= test_hw(&opts, "hw_dfl_perf");
+		f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
+		f_ret |= test_hw(&opts, "hw_dfl_perf");
 		f_ret |= test_hw(&opts, "hw_ifl_perf");
 	}
 	opts.is_stream = 0;	/* restore to BLOCK mode */
@@ -1162,42 +1252,10 @@ int run_self_test(void)
 		f_ret |= test_hw(&opts, "hw_dfl_perf");
 		f_ret |= test_hw(&opts, "hw_ifl_perf");
 	}
-	return 0;
 	printf("Start BATCH mode test for ASYNC...\n");
-	for (i = 0; i < 5; i++) {
-		opts.sync_mode = 1;
-		/* test boundary while batch_num is 64 or 128 */
-		opts.block_size = 8192;	opts.total_len = 8192 * 80;
-		switch (i) {
-		case 0:
-			opts.batch_num = 8;	opts.poll_num = 1;
-			opts.thread_num = 1;
-			break;
-		case 1:
-			opts.batch_num = 16;	opts.poll_num = 1;
-			opts.thread_num = 1;
-			break;
-		case 2:
-			opts.batch_num = 32;	opts.poll_num = 1;
-			opts.thread_num = 1;
-			break;
-		case 3:
-			opts.batch_num = 64;	opts.poll_num = 1;
-			opts.thread_num = 1;
-			break;
-		case 4:
-			opts.batch_num = 128;	opts.poll_num = 1;
-			opts.thread_num = 1;
-			break;
-		default:
-			return -EINVAL;
-		}
-		f_ret |= test_hw(&opts, "hw_dfl_perf2");
-		f_ret |= test_hw(&opts, "hw_ifl_perf2");
-	}
 	for (i = 0; i < 25; i++) {
 		opts.sync_mode = 1;
-		opts.block_size = 1024; opts.total_len = 8192 * 16;
+		opts.block_size = 8192; opts.total_len = 8192 * 80;
 		switch (i) {
 		case 0:
 			opts.batch_num = 8; 	opts.poll_num = 1;
@@ -1302,13 +1360,10 @@ int run_self_test(void)
 		default:
 			return -EINVAL;
 		}
-		f_ret |= test_hw(&opts, "hw_dfl_perf2");
-		usleep(10000);
-		f_ret |= test_hw(&opts, "hw_ifl_perf2");
-		usleep(10000);
+		f_ret |= test_hw(&opts, "hw_dfl_perf3");
+		f_ret |= test_hw(&opts, "hw_ifl_perf3");
 	}
 	printf("End BATCH mode test!\n");
-#endif
 	if (!f_ret)
 		printf("Run self test successfully!\n");
 	return f_ret;
