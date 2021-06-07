@@ -108,7 +108,7 @@ static void *sw_dfl_hw_ifl(void *arg)
 				printf("Fail to deflate by zlib: %d\n", ret);
 				goto out_strm;
 			}
-			tout_sz = tdata->out_list->size + HIZIP_PADDING;
+			tout_sz = tdata->dst_sz;
 			ret = hw_stream_decompress(opts->alg_type,
 						   opts->block_size,
 						   opts->data_fmt,
@@ -800,7 +800,8 @@ int store_olist(struct hizip_test_info *info, char *model)
 	struct test_options *opts = info->opts;
 	thread_data_t *tdata = &info->tdatas[0];
 	chunk_list_t *p;
-	size_t file_sz = 0, sum = 0;
+	size_t sum = 0;
+	ssize_t file_sz = 0;
 
 	if (!opts->is_stream) {
 		if (opts->fd_olist >= 0) {
@@ -849,11 +850,11 @@ int test_hw(struct test_options *opts, char *model)
 	char zbuf[120];
 	int ret, zbuf_idx, ifl_flag = 0;
 	void *(*func)(void *);
-	size_t tbuf_sz = 0; /*out_sz = 0, ifl_in_sz = 0;*/
+	size_t tbuf_sz = 0;
 	void *tbuf = NULL;
-	//ssize_t file_sz;
 	struct stat statbuf;
 	chunk_list_t *tlist;
+	int div;
 
 	if (!opts || !model) {
 		ret = -EINVAL;
@@ -917,7 +918,6 @@ int test_hw(struct test_options *opts, char *model)
 				   opts->sync_mode ? "ASYNC" : "SYNC",
 				   opts->is_stream ? "STREAM" : "BLOCK");
 		ifl_flag = 1;
-		//ifl_in_sz = info.in_size;
 	} else if (!strcmp(model, "hw_ifl_perf2")) {
 		func = hw_ifl_perf2;
 		info.in_size = opts->total_len * EXPANSION_RATIO;
@@ -952,6 +952,18 @@ int test_hw(struct test_options *opts, char *model)
 			} else {
 				info.out_size = opts->total_len *
 						EXPANSION_RATIO;
+			}
+		}
+		/*
+		 * If fd_ilist exists, it's inflation.
+		 * Make sure block inflation has enough room.
+		 */
+		if (opts->fd_ilist >= 0) {
+			ret = fstat(opts->fd_ilist, &statbuf);
+			if (!ret) {
+				div = statbuf.st_size / sizeof(chunk_list_t);
+				info.in_chunk_sz = (info.in_size + div - 1) /
+						   div;
 			}
 		}
 	}
@@ -1023,26 +1035,18 @@ int test_hw(struct test_options *opts, char *model)
 	}
 	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
 	       zbuf, speed, usec, opts->block_size);
-	/*
-	if (ifl_in_sz)
-		info.in_size = ifl_in_sz;
-		*/
 	uninit_config(&info, sched);
 	free_threads(&info);
 	wd_free_list_accels(info.list);
 	usleep(1000);
 	return 0;
+out_buf:
 out_poll:
 	free_threads(&info);
 out_send:
 out_dfl:
 	if (ifl_flag && tbuf && tbuf_sz)
 		mmap_free(tbuf, tbuf_sz);
-out_buf:
-	/*
-	if (ifl_in_sz)
-		info.in_size = ifl_in_sz;
-		*/
 out_src:
 	uninit_config(&info, sched);
 out_cfg:
@@ -1070,7 +1074,7 @@ int run_self_test(void)
 	int /*i, */f_ret = 0;
 
 	printf("Start to run self test!\n");
-#if 0
+#if 1
 	f_ret |= test_sw_dfl_sw_ifl(&opts);
 	opts.is_stream = 0;
 	f_ret |= test_hw(&opts, "sw_dfl_hw_ifl");

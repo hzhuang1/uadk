@@ -40,7 +40,7 @@ enum mode {
  * just in case. TODO: reduce this
  */
 #define EXPANSION_RATIO	2
-#define INFLATION_RATIO	16
+#define INFLATION_RATIO	24
 
 #define SGE_SIZE	(8 * 1024)
 

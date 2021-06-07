@@ -1979,7 +1979,11 @@ int create_send_tdata(struct test_options *opts,
 			ret = -ENOMEM;
 			goto out_dst;
 		}
-		//memset(tdata->dst, 0, tdata->dst_sz);
+		/*
+		 * Without memset, valgrind reports uninitialized buf
+		 * for writing to file.
+		 */
+		memset(tdata->dst, 0, tdata->dst_sz);
 		if (opts->is_stream) {
 			out_list = create_chunk_list(tdata->dst,
 						     tdata->dst_sz,
@@ -2224,9 +2228,8 @@ void free_threads(struct hizip_test_info *info)
 	if (info->poll_tds)
 		free(info->poll_tds);
 	free_chunk_list(tdatas[0].in_list);
-	for (i = 0; i < info->send_tnum; i++) {
+	for (i = 0; i < info->send_tnum; i++)
 		free_chunk_list(tdatas[i].out_list);
-	}
 	/* info->out_buf is bound to tdatas[0].dst */
 	for (i = 0; i < info->send_tnum; i++)
 		mmap_free(tdatas[i].dst, tdatas[i].dst_sz);
