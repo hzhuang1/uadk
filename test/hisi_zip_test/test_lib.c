@@ -929,58 +929,6 @@ int hw_deflate4(handle_t h_dfl,
 		struct test_options *opts,
 		sem_t *sem)
 {
-#if 0
-	struct wd_comp_req req = {0};
-	struct hizip_chunk_list *p = list;
-	off_t off;
-	int ret = 0, i;
-
-	req.src = in;
-	req.src_len = opts->block_size;
-	req.dst = out;
-	req.dst_len = opts->block_size * EXPANSION_RATIO;
-	req.op_type = WD_DIR_COMPRESS;
-	if (opts->sync_mode) {
-		req.cb = async2_cb;
-		req.cb_param = sem;
-	}
-
-	for (off = 0, i = 0; off < in_sz;) {
-		if (off + req.src_len > in_sz)
-			req.src_len = in_sz % req.src_len;
-		if (++i > HIZIP_CHUNK_LIST_ENTRIES) {
-			printf("No room in out list!\n");
-			return -EFAULT;
-		}
-		do {
-			if (opts->sync_mode) {
-				ret = wd_do_comp_async(h_dfl, &req);
-				if (!ret) {
-					__atomic_add_fetch(&sum_pend,
-							   1,
-							   __ATOMIC_ACQ_REL);
-					sem_wait(sem);
-				}
-			} else
-				ret = wd_do_comp_sync(h_dfl, &req);
-		} while (ret == -WD_EBUSY);
-		if (ret)
-			return ret;
-		if (p) {
-			p->addr = req.dst;
-			p->size = req.dst_len;
-			p->next = p + 1;
-			p++;
-		}
-		off += req.src_len;
-		req.src += opts->block_size;
-		req.src_len = opts->block_size;
-		req.dst += opts->block_size * EXPANSION_RATIO;
-		req.dst_len = opts->block_size * EXPANSION_RATIO;
-	}
-	*out_sz = in_sz * EXPANSION_RATIO;
-	return 0;
-#else
 	struct wd_comp_req *reqs;
 	chunk_list_t *p = in_list, *q = out_list;
 	int i, ret;
@@ -1021,7 +969,6 @@ int hw_deflate4(handle_t h_dfl,
 out:
 	free(reqs);
 	return ret;
-#endif
 }
 
 int hw_inflate4(handle_t h_ifl,
@@ -1030,84 +977,6 @@ int hw_inflate4(handle_t h_ifl,
 		struct test_options *opts,
 		sem_t *sem)
 {
-#if 0
-	struct wd_comp_req req = {0};
-	struct hizip_chunk_list *p = list;
-	size_t sum = 0, chunk_sz, step;
-	off_t off = 0;
-	int ret, i = 0;
-
-	chunk_sz = opts->block_size;
-	req.src = in;
-	req.src_len = chunk_sz * EXPANSION_RATIO;
-	req.dst = out;
-	req.dst_len = chunk_sz * INFLATION_RATIO;
-	req.op_type = WD_DIR_DECOMPRESS;
-	if (opts->sync_mode) {
-		req.cb = async2_cb;
-		req.cb_param = sem;
-	}
-
-	do {
-		if (off + req.src_len > in_sz)
-			req.src_len = in_sz % req.src_len;
-		if (++i > HIZIP_CHUNK_LIST_ENTRIES) {
-			printf("No room in out list!\n");
-			return -EFAULT;
-		}
-		printf("error, %d, off:%lx, src_len:%x, dst_len:%x\n", __LINE__, off, req.src_len, req.dst_len);
-		do {
-			if (opts->sync_mode) {
-				ret = wd_do_comp_async(h_ifl, &req);
-				if (!ret) {
-					__atomic_add_fetch(&sum_pend,
-							   1,
-							   __ATOMIC_ACQ_REL);
-					sem_wait(sem);
-				}
-			} else
-				ret = wd_do_comp_sync(h_ifl, &req);
-		} while (ret == -WD_EBUSY);
-		printf("error, %d, off:%lx, src_len:%x, dst_len:%x\n", __LINE__, off, req.src_len, req.dst_len);
-		if (ret)
-			return ret;
-		if (p) {
-			p->addr = req.dst;
-			p->size = req.dst_len;
-			p->next = p + 1;
-			p++;
-		}
-		if ((*((uint8_t *)req.src + req.src_len) == 0x1f) &&
-		    (*((uint8_t *)req.src + req.src_len + 1) == 0x8b)) {
-			/* gzip format */
-			off += req.src_len;
-			req.src += req.src_len;
-			req.src_len = chunk_sz * EXPANSION_RATIO;
-		} else {
-			if (req.src_len > chunk_sz) {
-				off += chunk_sz * EXPANSION_RATIO;
-				req.src += chunk_sz * EXPANSION_RATIO;
-				req.src_len = chunk_sz * EXPANSION_RATIO;
-			} else {
-				off += chunk_sz;
-				req.src += chunk_sz;
-				req.src_len = chunk_sz;
-			}
-		}
-		step = ALIGN(req.dst_len, chunk_sz);
-		if (sum + step > *out_sz) {
-			printf("No room for output!\n");
-			printf("off:%ld, sum:%ld, step:%ld, out_sz:%ld\n",
-				off, sum, step, *out_sz);
-			return -ENOMEM;
-		}
-		req.dst += step;
-		req.dst_len = chunk_sz * INFLATION_RATIO;
-		sum += step;
-	} while (!ret && (off + req.src_len < in_sz));
-	*out_sz = sum;
-	return 0;
-#else
 	struct wd_comp_req *reqs;
 	chunk_list_t *p, *q;
 	int i = 0, ret;
@@ -1150,7 +1019,6 @@ int hw_inflate4(handle_t h_ifl,
 out:
 	free(reqs);
 	return ret;
-#endif
 }
 
 void *poll2_thread_func(void *arg)
