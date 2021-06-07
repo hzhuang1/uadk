@@ -3,7 +3,7 @@
 #include "test_lib.h"
 
 /* PADDING could avoid blocking in HW inflation */
-#define HIZIP_PADDING	0
+#define HIZIP_PADDING	16
 
 static void *sw_dfl_sw_ifl(void *arg)
 {
@@ -377,7 +377,7 @@ static void *hw_dfl_hw_ifl(void *arg)
 				goto out;
 			}
 			printf("#%s, %d, src_len:%ld, tmp_sz:%d\n", __func__, __LINE__, tdata->src_sz, tmp_sz);
-			tout_sz = tdata->dst_sz + HIZIP_PADDING;
+			tout_sz = tdata->dst_sz;
 			ret = hw_stream_decompress(opts->alg_type,
 						   opts->block_size,
 						   opts->data_fmt,
@@ -554,15 +554,13 @@ static void *hw_ifl_perf(void *arg)
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
 	struct wd_comp_sess_setup setup = {0};
-	//chunk_list_t *list, *p = NULL;
 	handle_t h_ifl;
 	int i, ret;
-	//size_t out_sz = tdata->dst_sz, file_sz = 0;
 	uint32_t tout_sz;
 
 	if (opts->is_stream) {
 		for (i = 0; i < opts->compact_run_num; i++) {
-			tout_sz = tdata->dst_sz + HIZIP_PADDING;
+			tout_sz = tdata->dst_sz;
 			ret = hw_stream_decompress(opts->alg_type,
 						   opts->block_size,
 						   opts->data_fmt,
@@ -865,7 +863,10 @@ int test_hw(struct test_options *opts, char *model)
 	if (!strcmp(model, "sw_dfl_hw_ifl")) {
 		func = sw_dfl_hw_ifl;
 		info.in_size = opts->total_len;
-		info.out_size = opts->total_len;
+		if (opts->is_stream)
+			info.out_size = opts->total_len + HIZIP_PADDING;
+		else
+			info.out_size = opts->total_len;
 		info.in_chunk_sz = opts->block_size;
 		info.out_chunk_sz = opts->block_size;
 		zbuf_idx = sprintf(zbuf, "Mix SW deflate and HW %s %s inflate",
@@ -883,7 +884,10 @@ int test_hw(struct test_options *opts, char *model)
 	} else if (!strcmp(model, "hw_dfl_hw_ifl")) {
 		func = hw_dfl_hw_ifl;
 		info.in_size = opts->total_len;
-		info.out_size = opts->total_len;
+		if (opts->is_stream)
+			info.out_size = opts->total_len + HIZIP_PADDING;
+		else
+			info.out_size = opts->total_len;
 		info.in_chunk_sz = opts->block_size;
 		info.out_chunk_sz = opts->block_size;
 		zbuf_idx = sprintf(zbuf,
