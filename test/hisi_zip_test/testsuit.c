@@ -1004,9 +1004,6 @@ int test_hw(struct test_options *opts, char *model)
 						  EXPANSION_RATIO);
 			init_chunk_list(tlist, tbuf, tbuf_sz,
 					opts->block_size / EXPANSION_RATIO);
-			init_chunk_list(tdata[0].in_list, tdata[0].src,
-					tdata[0].src_sz,
-					info.in_chunk_sz);
 			gen_random_data(tbuf, tbuf_sz);
 			ret = sw_deflate2(tlist, tdata[0].in_list, opts);
 			if (ret)
