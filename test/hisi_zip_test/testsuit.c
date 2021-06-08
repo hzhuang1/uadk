@@ -1156,8 +1156,8 @@ int test_hw(struct test_options *opts, char *model)
 				    " with %d send threads",
 				    opts->thread_num);
 	}
-	printf("%s at %.2fMB/s in %f usec (Bsize:%d).\n",
-	       zbuf, speed, usec, opts->block_size);
+	printf("%s at %.2fMB/s in %f usec (BLK:%d, Bnum:%d).\n",
+	       zbuf, speed, usec, opts->block_size, opts->batch_num);
 	uninit_config(&info, sched);
 	free_threads(&info);
 	wd_free_list_accels(info.list);
@@ -1183,6 +1183,7 @@ int run_self_test(void)
 {
 	struct test_options opts = {
 		.alg_type		= WD_ZLIB,
+		.data_fmt		= WD_FLAT_BUF,
 		.sync_mode		= 0,
 		.thread_num		= 16,
 		.q_num			= 16,
@@ -1193,15 +1194,51 @@ int run_self_test(void)
 	int i, f_ret = 0;
 
 	printf("Start to run self test!\n");
-	for (i = 0; i < 1; i++) {
+	for (i = 0; i < 10; i++) {
 		opts.sync_mode = 0;
-		opts.is_stream = 1;
-		f_ret |= test_hw(&opts, "hw_dfl_hw_ifl");
+		switch (i) {
+		case 0:
+			opts.thread_num = 1;
+			break;
+		case 1:
+			opts.thread_num = 2;
+			break;
+		case 2:
+			opts.thread_num = 4;
+			break;
+		case 3:
+			opts.thread_num = 8;
+			break;
+		case 4:
+			opts.thread_num = 16;
+			break;
+		case 5:
+			opts.thread_num = 1;
+			opts.is_stream = 1;
+			break;
+		case 6:
+			opts.thread_num = 2;
+			opts.is_stream = 1;
+			break;
+		case 7:
+			opts.thread_num = 4;
+			opts.is_stream = 1;
+			break;
+		case 8:
+			opts.thread_num = 8;
+			opts.is_stream = 1;
+			break;
+		case 9:
+			opts.thread_num = 16;
+			opts.is_stream = 1;
+			break;
+		}
 		f_ret |= test_hw(&opts, "hw_dfl_perf");
 		f_ret |= test_hw(&opts, "hw_ifl_perf");
 	}
 	opts.is_stream = 0;	/* restore to BLOCK mode */
 	for (i = 0; i < 10; i++) {
+		opts.thread_num = 8;
 		switch (i) {
 		case 0:
 			opts.sync_mode = 0;
@@ -1252,9 +1289,9 @@ int run_self_test(void)
 		f_ret |= test_hw(&opts, "hw_dfl_perf");
 		f_ret |= test_hw(&opts, "hw_ifl_perf");
 	}
-	printf("Start BATCH mode test for ASYNC...\n");
-	for (i = 0; i < 25; i++) {
-		opts.sync_mode = 1;
+	printf("Start BATCH mode test especially for ASYNC...\n");
+	for (i = 0; i < 28; i++) {
+		opts.sync_mode = 1;	opts.q_num = 16;
 		opts.block_size = 8192; opts.total_len = 8192 * 80;
 		switch (i) {
 		case 0:
@@ -1274,94 +1311,117 @@ int run_self_test(void)
 			opts.thread_num = 1;
 			break;
 		case 4:
-			opts.batch_num = 128; 	opts.poll_num = 1;
-			opts.thread_num = 1;
+			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.thread_num = 2;
 			break;
 		case 5:
-			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.batch_num = 16;	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 6:
-			opts.batch_num = 16;	opts.poll_num = 1;
+			opts.batch_num = 32; 	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 7:
-			opts.batch_num = 32; 	opts.poll_num = 1;
+			opts.batch_num = 64;	opts.poll_num = 1;
 			opts.thread_num = 2;
 			break;
 		case 8:
-			opts.batch_num = 64;	opts.poll_num = 1;
-			opts.thread_num = 2;
+			opts.batch_num = 8; 	opts.poll_num = 1;
+			opts.thread_num = 4;
 			break;
 		case 9:
-			opts.batch_num = 128; 	opts.poll_num = 1;
-			opts.thread_num = 2;
+			opts.batch_num = 16;	opts.poll_num = 1;
+			opts.thread_num = 4;
 			break;
 		case 10:
-			opts.batch_num = 8; 	opts.poll_num = 1;
-			opts.thread_num = 4;
+			opts.sync_mode = 0;	opts.batch_num = 8;
+			opts.thread_num = 1;	opts.poll_num = 0;
 			break;
 		case 11:
-			opts.batch_num = 16;	opts.poll_num = 1;
-			opts.thread_num = 4;
+			opts.sync_mode = 0;	opts.batch_num = 16;
+			opts.thread_num = 1;	opts.poll_num = 0;
 			break;
 		case 12:
-			opts.batch_num = 32; 	opts.poll_num = 1;
-			opts.thread_num = 4;
+			opts.sync_mode = 0;	opts.batch_num = 32;
+			opts.thread_num = 1;	opts.poll_num = 0;
 			break;
 		case 13:
-			opts.batch_num = 64;	opts.poll_num = 1;
-			opts.thread_num = 4;
+			opts.sync_mode = 0;	opts.batch_num = 8;
+			opts.thread_num = 2;	opts.poll_num = 0;
 			break;
 		case 14:
-			opts.batch_num = 128; 	opts.poll_num = 1;
-			opts.thread_num = 4;
+			opts.sync_mode = 0;	opts.batch_num = 16;
+			opts.thread_num = 2;	opts.poll_num = 0;
 			break;
 		case 15:
-			opts.batch_num = 8;	opts.poll_num = 1;
-			opts.thread_num = 8;
+			opts.sync_mode = 0;	opts.batch_num = 32;
+			opts.thread_num = 2;	opts.poll_num = 0;
 			break;
 		case 16:
-			opts.batch_num = 16; 	opts.poll_num = 1;
-			opts.thread_num = 8;
+			opts.sync_mode = 0;	opts.batch_num = 8;
+			opts.thread_num = 4;	opts.poll_num = 0;
 			break;
 		case 17:
-			opts.batch_num = 32;	opts.poll_num = 1;
-			opts.thread_num = 8;
+			opts.sync_mode = 0;	opts.batch_num = 16;
+			opts.thread_num = 4;	opts.poll_num = 0;
 			break;
 		case 18:
-			opts.batch_num = 64;	opts.poll_num = 1;
-			opts.thread_num = 8;
+			opts.sync_mode = 0;	opts.batch_num = 32;
+			opts.thread_num = 4;	opts.poll_num = 0;
 			break;
 		case 19:
-			opts.batch_num = 128; 	opts.poll_num = 1;
-			opts.thread_num = 8;
+			opts.sync_mode = 0;	opts.batch_num = 8;
+			opts.thread_num = 1;	opts.poll_num = 0;
+			opts.is_stream = 1;
 			break;
 		case 20:
-			opts.batch_num = 8; 	opts.poll_num = 1;
-			opts.thread_num = 16;
+			opts.sync_mode = 0;	opts.batch_num = 16;
+			opts.thread_num = 1;	opts.poll_num = 0;
+			opts.is_stream = 1;
 			break;
 		case 21:
-			opts.batch_num = 16;	opts.poll_num = 1;
-			opts.thread_num = 16;
+			opts.sync_mode = 0;	opts.batch_num = 32;
+			opts.thread_num = 1;	opts.poll_num = 0;
+			opts.is_stream = 1;
 			break;
 		case 22:
-			opts.batch_num = 32;	opts.poll_num = 1;
-			opts.thread_num = 16;
+			opts.sync_mode = 0;	opts.batch_num = 8;
+			opts.thread_num = 2;	opts.poll_num = 0;
+			opts.is_stream = 1;
 			break;
 		case 23:
-			opts.batch_num = 64;	opts.poll_num = 1;
-			opts.thread_num = 16;
+			opts.sync_mode = 0;	opts.batch_num = 16;
+			opts.thread_num = 2;	opts.poll_num = 0;
+			opts.is_stream = 1;
 			break;
 		case 24:
-			opts.batch_num = 128; 	opts.poll_num = 1;
-			opts.thread_num = 16;
+			opts.sync_mode = 0;	opts.batch_num = 32;
+			opts.thread_num = 2;	opts.poll_num = 0;
+			opts.is_stream = 1;
+			break;
+		case 25:
+			opts.sync_mode = 0;	opts.batch_num = 8;
+			opts.thread_num = 4;	opts.poll_num = 0;
+			opts.is_stream = 1;
+			break;
+		case 26:
+			opts.sync_mode = 0;	opts.batch_num = 16;
+			opts.thread_num = 4;	opts.poll_num = 0;
+			opts.is_stream = 1;
+			break;
+		case 27:
+			opts.sync_mode = 0;	opts.batch_num = 32;
+			opts.thread_num = 4;	opts.poll_num = 0;
+			opts.is_stream = 1;
 			break;
 		default:
 			return -EINVAL;
 		}
 		f_ret |= test_hw(&opts, "hw_dfl_perf3");
+		usleep(10000);
 		f_ret |= test_hw(&opts, "hw_ifl_perf3");
+		usleep(10000);
 	}
 	printf("End BATCH mode test!\n");
 	if (!f_ret)

@@ -174,6 +174,24 @@ static void *async4_cb(struct wd_comp_req *req, void *data)
 	return NULL;
 }
 
+/* used in BATCH mode */
+static void *async5_cb(struct wd_comp_req *req, void *data)
+{
+	thread_data_t *tdata = (thread_data_t *)data;
+
+	pthread_spin_lock(&lock);
+	tdata->pcnt++;
+	if (tdata->batch_flag && (tdata->pcnt == tdata->bcnt)) {
+		tdata->pcnt = 0;
+		tdata->bcnt = 0;
+		tdata->batch_flag = 0;
+		pthread_spin_unlock(&lock);
+		sem_post(&tdata->sem);
+	} else
+		pthread_spin_unlock(&lock);
+	return NULL;
+}
+
 static int chunk_deflate(void *in, void *out, struct test_options *opts)
 {
 	size_t chunk_sz = opts->block_size;
@@ -963,6 +981,10 @@ int hw_deflate4(handle_t h_dfl,
 		if (ret)
 			goto out;
 		q->size = reqs[i].dst_len;
+		/* make sure olist has the same length with ilist */
+		if (!p->next)
+			q->next = NULL;
+		i++;
 	}
 	free(reqs);
 	return 0;
@@ -1029,52 +1051,41 @@ int hw_deflate5(handle_t h_dfl,
 {
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
-	struct wd_comp_req *reqs;
+	struct wd_comp_req *reqs = tdata->reqs;
 	chunk_list_t *p = in_list, *q = out_list;
-	int i = 0, flag, ret = 0;
+	int i = 0, ret = 0;
 
 	if (!in_list || !out_list || !opts)
 		return -EINVAL;
-	/* reqs array could make async operations in parallel */
-	reqs = calloc(1, sizeof(struct wd_comp_req) * HIZIP_CHUNK_LIST_ENTRIES);
-	if (!reqs)
-		return -ENOMEM;
 	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
 		reqs[i].src = p->addr;
 		reqs[i].src_len = p->size;
 		reqs[i].dst = q->addr;
 		reqs[i].dst_len = q->size;
 		reqs[i].op_type = WD_DIR_COMPRESS;
+		reqs[i].data_fmt = opts->data_fmt;
 		if (opts->sync_mode) {
-			reqs[i].cb = async4_cb;
+			reqs[i].cb = async5_cb;
 			reqs[i].cb_param = tdata;
+		} else {
+			reqs[i].cb = NULL;
+			reqs[i].cb_param = NULL;
 		}
 		if (opts->sync_mode) {
 			do {
-				flag = __atomic_load_n(
-					&tdata->batch_flag,
-					__ATOMIC_ACQUIRE);
-			} while (flag);
-			pthread_spin_lock(&lock);
-			while (1) {
 				ret = wd_do_comp_async(h_dfl, &reqs[i]);
-				if (ret == -WD_EBUSY) {
-					continue;
-				} else if (ret < 0) {
-					pthread_spin_unlock(&lock);
-					goto out;
-				}
-				__atomic_add_fetch(&sum_pend, 1,
-						   __ATOMIC_ACQ_REL);
-				tdata->bcnt++;
-				if ((tdata->bcnt == opts->batch_num) ||
-				    !p->next) {
-					__atomic_store_n(&tdata->batch_flag, 1,
-							 __ATOMIC_RELEASE);
-					break;
-				}
-			}
-			pthread_spin_unlock(&lock);
+			} while (ret == -WD_EBUSY);
+			if (ret < 0)
+				goto out;
+			__atomic_add_fetch(&sum_pend, 1, __ATOMIC_ACQ_REL);
+			pthread_spin_lock(&lock);
+			tdata->bcnt++;
+			if (((i + 1) == opts->batch_num) || !p->next) {
+				tdata->batch_flag = 1;
+				pthread_spin_unlock(&lock);
+				sem_wait(&tdata->sem);
+			} else
+				pthread_spin_unlock(&lock);
 		} else {
 			do {
 				ret = wd_do_comp_sync(h_dfl, &reqs[i]);
@@ -1083,15 +1094,13 @@ int hw_deflate5(handle_t h_dfl,
 				goto out;
 		}
 		q->size = reqs[i].dst_len;
+		i = (i + 1) % opts->batch_num;
 		/* make sure olist has the same length with ilist */
 		if (!p->next)
 			q->next = NULL;
-		i++;
 	}
-	free(reqs);
 	return 0;
 out:
-	free(reqs);
 	return ret;
 }
 
@@ -1103,52 +1112,41 @@ int hw_inflate5(handle_t h_ifl,
 {
 	struct hizip_test_info *info = tdata->info;
 	struct test_options *opts = info->opts;
-	struct wd_comp_req *reqs;
+	struct wd_comp_req *reqs = tdata->reqs;
 	chunk_list_t *p = in_list, *q = out_list;
-	int ret = 0, flag, i = 0;
+	int ret = 0, i = 0;
 
 	if (!in_list || !out_list || !opts)
 		return -EINVAL;
-	/* reqs array could make async operations in parallel */
-	reqs = calloc(1, sizeof(struct wd_comp_req) * HIZIP_CHUNK_LIST_ENTRIES);
-	if (!reqs)
-		return -ENOMEM;
 	for (p = in_list, q = out_list; p && q; p = p->next, q = q->next) {
 		reqs[i].src = p->addr;
 		reqs[i].src_len = p->size;
 		reqs[i].dst = q->addr;
 		reqs[i].dst_len = q->size;
 		reqs[i].op_type = WD_DIR_DECOMPRESS;
+		reqs[i].data_fmt = opts->data_fmt;
 		if (opts->sync_mode) {
-			reqs[i].cb = async4_cb;
+			reqs[i].cb = async5_cb;
 			reqs[i].cb_param = tdata;
+		} else {
+			reqs[i].cb = NULL;
+			reqs[i].cb_param = NULL;
 		}
 		if (opts->sync_mode) {
 			do {
-				flag = __atomic_load_n(
-					&tdata->batch_flag,
-					__ATOMIC_ACQUIRE);
-			} while (flag);
-			pthread_spin_lock(&lock);
-			while (1) {
 				ret = wd_do_comp_async(h_ifl, &reqs[i]);
-				if (ret == -WD_EBUSY) {
-					continue;
-				} else if (ret < 0) {
-					pthread_spin_unlock(&lock);
-					goto out;
-				}
-				__atomic_add_fetch(&sum_pend, 1,
-						   __ATOMIC_ACQ_REL);
-				tdata->bcnt++;
-				if ((tdata->bcnt == opts->batch_num) ||
-				    !p->next) {
-					__atomic_store_n(&tdata->batch_flag, 1,
-							 __ATOMIC_RELEASE);
-					break;
-				}
-			}
-			pthread_spin_unlock(&lock);
+			} while (ret == -WD_EBUSY);
+			if (ret < 0)
+				goto out;
+			__atomic_add_fetch(&sum_pend, 1, __ATOMIC_ACQ_REL);
+			pthread_spin_lock(&lock);
+			tdata->bcnt++;
+			if (((i + 1) == opts->batch_num) || !p->next) {
+				tdata->batch_flag = 1;
+				pthread_spin_unlock(&lock);
+				sem_wait(&tdata->sem);
+			} else
+				pthread_spin_unlock(&lock);
 		} else {
 			do {
 				ret = wd_do_comp_sync(h_ifl, &reqs[i]);
@@ -1157,15 +1155,13 @@ int hw_inflate5(handle_t h_ifl,
 				goto out;
 		}
 		q->size = reqs[i].dst_len;
+		i = (i + 1) % opts->batch_num;
 		/* make sure olist has the same length with ilist */
 		if (!p->next)
 			q->next = NULL;
-		i++;
 	}
-	free(reqs);
 	return 0;
 out:
-	free(reqs);
 	return ret;
 }
 
@@ -1971,6 +1967,10 @@ int create_send_tdata(struct test_options *opts,
 		ret = -ENOMEM;
 		goto out;
 	}
+	if (!opts->batch_num)
+		opts->batch_num = 1;
+	else if (opts->batch_num > HIZIP_CHUNK_LIST_ENTRIES)
+		opts->batch_num = HIZIP_CHUNK_LIST_ENTRIES;
 	if (opts->is_stream) {
 		in_list = create_chunk_list(info->in_buf, info->in_size,
 					    info->in_size);
@@ -2015,6 +2015,10 @@ int create_send_tdata(struct test_options *opts,
 			goto out_list;
 		}
 		calculate_md5(&tdata->md5, tdata->src, tdata->src_sz);
+		tdata->reqs = malloc(sizeof(struct wd_comp_req) *
+				     opts->batch_num);
+		if (!tdata->reqs)
+			goto out_list;
 		tdata->info = info;
 	}
 	return 0;
@@ -2244,8 +2248,10 @@ void free_threads(struct hizip_test_info *info)
 	if (info->poll_tds)
 		free(info->poll_tds);
 	free_chunk_list(tdatas[0].in_list);
-	for (i = 0; i < info->send_tnum; i++)
+	for (i = 0; i < info->send_tnum; i++) {
 		free_chunk_list(tdatas[i].out_list);
+		free(tdatas[i].reqs);
+	}
 	/* info->out_buf is bound to tdatas[0].dst */
 	for (i = 0; i < info->send_tnum; i++)
 		mmap_free(tdatas[i].dst, tdatas[i].dst_sz);

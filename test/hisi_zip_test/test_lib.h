@@ -145,6 +145,7 @@ typedef struct _thread_data_t {
 	size_t sum;	/* produced bytes for OUT */
 	chunk_list_t *in_list;
 	chunk_list_t *out_list;
+	struct wd_comp_req *reqs;
 } thread_data_t;
 
 struct hizip_test_info {
