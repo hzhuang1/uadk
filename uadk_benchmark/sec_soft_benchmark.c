@@ -813,6 +813,7 @@ int sec_soft_sync_threads(struct acc_option *options)
 	soft_thread threads_option;
 	pthread_t tdid[THREADS_NUM];
 	int i, ret;
+	u32 ptime;
 
 	/* alg param parse and set to thread data */
 	ret = sec_soft_param_parse(&threads_option, options);
@@ -835,6 +836,9 @@ int sec_soft_sync_threads(struct acc_option *options)
 		}
 	}
 
+	get_pid_cpu_time(&ptime);
+	time_start(options->times);
+
 	/* join thread */
 	for (i = 0; i < g_thread_num; i++) {
 		ret = pthread_join(tdid[i], NULL);
@@ -843,6 +847,7 @@ int sec_soft_sync_threads(struct acc_option *options)
 			goto sync_error;
 		}
 	}
+	cal_perfermance_data(options, ptime);
 
 sync_error:
 	return ret;
@@ -855,6 +860,7 @@ int sec_soft_async_threads(struct acc_option *options)
 	soft_thread threads_option;
 	pthread_t tdid[THREADS_NUM];
 	int i, ret;
+	u32 ptime;
 
 	/* alg param parse and set to thread data */
 	ret = sec_soft_param_parse(&threads_option, options);
@@ -877,6 +883,9 @@ int sec_soft_async_threads(struct acc_option *options)
 		}
 	}
 
+	get_pid_cpu_time(&ptime);
+	time_start(options->times);
+
 	/* join thread */
 	for (i = 0; i < g_thread_num; i++) {
 		ret = pthread_join(tdid[i], NULL);
@@ -885,6 +894,7 @@ int sec_soft_async_threads(struct acc_option *options)
 			goto async_error;
 		}
 	}
+	cal_perfermance_data(options, ptime);
 
 async_error:
 	return ret;
@@ -957,7 +967,6 @@ static void uadk_engine_unregister(struct acc_option *options)
 
 int sec_soft_benchmark(struct acc_option *options)
 {
-	u32 ptime;
 	int ret;
 
 	g_thread_num = options->threads;
@@ -976,13 +985,10 @@ int sec_soft_benchmark(struct acc_option *options)
 	if (ret)
 		return ret;
 
-	get_pid_cpu_time(&ptime);
-	time_start(options->times);
 	if (options->syncmode)
 		ret = sec_soft_async_threads(options);
 	else
 		ret = sec_soft_sync_threads(options);
-	cal_perfermance_data(options, ptime);
 	if (ret)
 		return ret;
 
