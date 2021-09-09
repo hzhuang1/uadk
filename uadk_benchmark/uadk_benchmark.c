@@ -204,15 +204,14 @@ static int get_mode_type(const char *mode_name)
 	return modetype;
 }
 
-int get_pid_cpu_time(u32 *ptime)
+int get_pid_cpu_time(u32 *ptime, struct timeval *tvl)
 {
 	u64 caltime[8] = {0};
 	int pid = getpid();
-	char dev_path[64];
-	char buf[256];
+	char dev_path[64] = {0};
+	char buf[256] = {0};
 	int i, fd, ret, bgidx;
 
-	memset(dev_path, 0, 64);
 	snprintf(dev_path, 64, "/proc/%d/stat", pid);
 	fd = open(dev_path, O_RDONLY, 0);
 	if (fd < 0) {
@@ -221,7 +220,6 @@ int get_pid_cpu_time(u32 *ptime)
 		return -1;
 	}
 
-	memset(buf, 0, 256);
 	ret = read(fd, buf, 255);
 	if (ret <= 0) {
 		printf("read data fail!\n");
@@ -241,10 +239,12 @@ int get_pid_cpu_time(u32 *ptime)
 	ret = sscanf(&buf[i], "%llu %llu %llu %llu", &caltime[0], &caltime[1],
 		&caltime[2], &caltime[3]);
 	*ptime = caltime[0] + caltime[1] + caltime[2] + caltime[3];
-	// printf("read process time: %u\n", *ptime);
+
+	gettimeofday(tvl, NULL);
 
 	return 0;
 }
+
 
 void mdelay(u32 ms)
 {
@@ -373,10 +373,11 @@ static void parse_alg_param(struct acc_option *option)
 	}
 }
 
-void cal_perfermance_data(struct acc_option *option, u32 sttime)
+void cal_performance_data(struct acc_option *option, u32 sttime,
+			  struct timeval start_tvl)
 {
 	u8 palgname[MAX_ALG_NAME];
-	double perfermance;
+	double performance;
 	double cpu_rate;
 	u32 ttime = 1000;
 	u32 perfdata;
@@ -384,10 +385,13 @@ void cal_perfermance_data(struct acc_option *option, u32 sttime)
 	double ops;
 	u32 ptime;
 	int i, len;
+	struct timeval end_tvl;
+	double usec;
 
-	get_pid_cpu_time(&ptime);
+	get_pid_cpu_time(&ptime, &end_tvl);
+	timersub(&end_tvl, &start_tvl, &end_tvl);
 
-	while(ttime) {
+	while (ttime) {
 		if (option->syncmode == SYNC_MODE) {
 			if (get_recv_time() == option->threads)
 				break;
@@ -410,14 +414,16 @@ void cal_perfermance_data(struct acc_option *option, u32 sttime)
 		palgname[i] = '\0';
 
 	ptime = ptime - sttime;
+	usec = (double)(end_tvl.tv_sec * 1000000 + end_tvl.tv_usec);
+
 	perfdata = (g_recv_data.recv_cnt * option->pktlen) >> BYTES_TO_KB;
 	perfops = (g_recv_data.recv_cnt) >> BYTES_TO_KB;
-	perfermance = (double)perfdata / option->times;
-	ops = (double)perfops / option->times;
-	cpu_rate = (double)ptime / option->times;
+	performance = (double)perfdata * 1000 * 1000 / usec;
+	ops = (double)perfops * 1000 * 1000 / usec;
+	cpu_rate = (double)ptime * 1000 * 1000 / usec;
 	ACC_TST_PRT("algname:	length:		perf:		iops:		CPU_rate:\n"
 			"%s	%uBytes	%.1fKB/s	%.1fKops 	%.2f%%\n",
-			palgname, option->pktlen, perfermance, ops, cpu_rate);
+			palgname, option->pktlen, performance, ops, cpu_rate);
 }
 
 static int benchmark_run(struct acc_option *option)

@@ -1076,6 +1076,7 @@ int sec_wd_sync_threads(struct acc_option *options)
 	pthread_t tdid[THREADS_NUM];
 	int i, ret;
 	u32 ptime;
+	struct timeval start_tvl;
 
 	/* alg param parse and set to thread data */
 	ret = sec_wd_param_parse(&threads_option, options);
@@ -1097,7 +1098,7 @@ int sec_wd_sync_threads(struct acc_option *options)
 		}
 	}
 
-	get_pid_cpu_time(&ptime);
+	get_pid_cpu_time(&ptime, &start_tvl);
 	time_start(options->times);
 
 	/* join thread */
@@ -1108,7 +1109,7 @@ int sec_wd_sync_threads(struct acc_option *options)
 			goto sync_error;
 		}
 	}
-	cal_perfermance_data(options, ptime);
+	cal_performance_data(options, ptime, start_tvl);
 
 sync_error:
 	return ret;
@@ -1123,6 +1124,7 @@ int sec_wd_async_threads(struct acc_option *options)
 	pthread_t pollid;
 	int i, ret;
 	u32 ptime;
+	struct timeval start_tvl;
 
 	/* alg param parse and set to thread data */
 	ret = sec_wd_param_parse(&threads_option, options);
@@ -1151,7 +1153,7 @@ int sec_wd_async_threads(struct acc_option *options)
 		}
 	}
 
-	get_pid_cpu_time(&ptime);
+	get_pid_cpu_time(&ptime, &start_tvl);
 	time_start(options->times);
 
 	/* join thread */
@@ -1168,7 +1170,7 @@ int sec_wd_async_threads(struct acc_option *options)
 		SEC_TST_PRT("Join poll thread fail!\n");
 		goto async_error;
 	}
-	cal_perfermance_data(options, ptime);
+	cal_performance_data(options, ptime, start_tvl);
 
 async_error:
 	return ret;

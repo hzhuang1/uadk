@@ -938,6 +938,7 @@ int sec_uadk_sync_threads(struct acc_option *options)
 	pthread_t tdid[THREADS_NUM];
 	int i, ret;
 	u32 ptime;
+	struct timeval start_tvl;
 
 	/* alg param parse and set to thread data */
 	ret = sec_uadk_param_parse(&threads_option, options);
@@ -959,7 +960,7 @@ int sec_uadk_sync_threads(struct acc_option *options)
 		}
 	}
 
-	get_pid_cpu_time(&ptime);
+	get_pid_cpu_time(&ptime, &start_tvl);
 	time_start(options->times);
 
 	/* join thread */
@@ -971,7 +972,7 @@ int sec_uadk_sync_threads(struct acc_option *options)
 		}
 	}
 
-	cal_perfermance_data(options, ptime);
+	cal_performance_data(options, ptime, start_tvl);
 
 sync_error:
 	return ret;
@@ -986,6 +987,7 @@ int sec_uadk_async_threads(struct acc_option *options)
 	pthread_t pollid;
 	int i, ret;
 	u32 ptime;
+	struct timeval start_tvl;
 
 	/* alg param parse and set to thread data */
 	ret = sec_uadk_param_parse(&threads_option, options);
@@ -1014,7 +1016,7 @@ int sec_uadk_async_threads(struct acc_option *options)
 		}
 	}
 
-	get_pid_cpu_time(&ptime);
+	get_pid_cpu_time(&ptime, &start_tvl);
 	time_start(options->times);
 
 	/* join thread */
@@ -1032,7 +1034,7 @@ int sec_uadk_async_threads(struct acc_option *options)
 		goto async_error;
 	}
 
-	cal_perfermance_data(options, ptime);
+	cal_performance_data(options, ptime, start_tvl);
 
 async_error:
 	return ret;
