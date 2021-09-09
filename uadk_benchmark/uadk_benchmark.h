@@ -159,8 +159,9 @@ enum test_alg {
 };
 
 extern void mdelay(u32 ms);
-extern int get_pid_cpu_time(u32 *ptime);
-extern void cal_perfermance_data(struct acc_option *option, u32 sttime);
+extern int get_pid_cpu_time(u32 *ptime, struct timeval *tvl);
+extern void cal_performance_data(struct acc_option *option, u32 sttime,
+				 struct timeval tvl);
 extern void time_start(u32 seconds);
 extern int get_run_state(void);
 extern void set_run_state(int state);
