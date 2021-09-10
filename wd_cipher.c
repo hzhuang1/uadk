@@ -13,6 +13,8 @@
 #include "include/drv/wd_cipher_drv.h"
 #include "wd_util.h"
 
+#include <sys/time.h>
+
 #define XTS_MODE_KEY_DIVISOR	2
 #define SM4_KEY_SIZE		16
 #define DES_KEY_SIZE		8
@@ -383,7 +385,9 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	__u64 recv_cnt = 0;
 	__u32 idx;
 	int ret;
+	struct timeval tv1, tv2;
 
+	gettimeofday(&tv1, NULL);
 	ret = wd_cipher_check_params(h_sess, req, CTX_MODE_SYNC);
 	if (unlikely(ret)) {
 		WD_ERR("failed to check cipher params!\n");
@@ -410,13 +414,20 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 	fill_request_msg(&msg, req, sess);
 	req->state = 0;
 
+	gettimeofday(&tv2, NULL);
+	timersub(&tv2, &tv1, &req->tv[0]);
 	pthread_spin_lock(&ctx->lock);
+	gettimeofday(&tv1, NULL);
+	timersub(&tv1, &tv2, &req->tv[1]);
 
 	ret = wd_cipher_setting.driver->cipher_send(ctx->ctx, &msg);
 	if (unlikely(ret < 0)) {
 		WD_ERR("wd cipher send err!\n");
 		goto err_out;
 	}
+	gettimeofday(&tv2, NULL);
+	timersub(&tv2, &tv1, &req->tv[2]);
+	timerclear(&req->tv[3]);
 
 	do {
 		if (req->in_bytes >= POLL_SIZE) {
@@ -438,6 +449,8 @@ int wd_do_cipher_sync(handle_t h_sess, struct wd_cipher_req *req)
 		}
 	} while (ret < 0);
 	pthread_spin_unlock(&ctx->lock);
+	gettimeofday(&tv1, NULL);
+	timersub(&tv1, &tv2, &req->tv[3]);
 
 	return 0;
 err_out:
