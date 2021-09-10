@@ -104,6 +104,7 @@ struct wd_cipher_req {
 	__u8			data_fmt;
 	wd_alg_cipher_cb_t	*cb;
 	void			*cb_param;
+	struct timeval		tv[8];
 };
 
 /**

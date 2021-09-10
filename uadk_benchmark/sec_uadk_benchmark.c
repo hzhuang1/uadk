@@ -33,6 +33,7 @@ typedef struct uadk_thread_res {
 	u32 ivsize;
 	u32 optype;
 	u32 td_id;
+	struct timeval tvsum[8];
 } thread_data;
 
 #define MAX_POOL_LENTH		4096
@@ -771,6 +772,8 @@ static void *sec_uadk_async_run(void *arg)
 	return NULL;
 }
 
+struct timeval tvsum[8] = {0};
+static pthread_mutex_t tv_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void *sec_uadk_sync_run(void *arg)
 {
 	thread_data *pdata = (thread_data *)arg;
@@ -785,6 +788,7 @@ static void *sec_uadk_sync_run(void *arg)
 	handle_t h_sess;
 	u32 count = 0;
 	int ret, i = 0;
+	struct timeval tv[8] = {0};
 
 	if (pdata->td_id > g_thread_num)
 		return NULL;
@@ -795,6 +799,10 @@ static void *sec_uadk_sync_run(void *arg)
 
 	memset(priv_iv, DEF_IVK_DATA, MAX_IVK_LENTH);
 	memset(priv_key, DEF_IVK_DATA, MAX_IVK_LENTH);
+
+	for (i = 0; i < 8; i++)
+		timerclear(&pdata->tvsum[i]);
+	i = 0;
 
 	switch(pdata->subtype) {
 	case CIPHER_TYPE:
@@ -824,6 +832,10 @@ static void *sec_uadk_sync_run(void *arg)
 			creq.src = uadk_pool->bds[i].src;
 			creq.dst = uadk_pool->bds[i].dst;
 			ret = wd_do_cipher_sync(h_sess, &creq);
+			timeradd(&pdata->tvsum[0], &creq.tv[0], &pdata->tvsum[0]);
+			timeradd(&pdata->tvsum[1], &creq.tv[1], &pdata->tvsum[1]);
+			timeradd(&pdata->tvsum[2], &creq.tv[2], &pdata->tvsum[2]);
+			timeradd(&pdata->tvsum[3], &creq.tv[3], &pdata->tvsum[3]);
 			if (ret || creq.state)
 				break;
 			count++;
@@ -917,6 +929,11 @@ static void *sec_uadk_sync_run(void *arg)
 	}
 
 	add_recv_data(count);
+
+	pthread_mutex_lock(&tv_mutex);
+	for (i = 0; i < 8; i++)
+		timeradd(&tvsum[i], &pdata->tvsum[i], &tvsum[i]);
+	pthread_mutex_unlock(&tv_mutex);
 
 	return NULL;
 }

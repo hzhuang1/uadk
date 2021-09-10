@@ -358,6 +358,7 @@ static void parse_alg_param(struct acc_option *option)
 	}
 }
 
+extern struct timeval tvsum[];
 void cal_performance_data(struct acc_option *option, u32 sttime,
 			  struct timeval start_tvl)
 {
@@ -372,6 +373,7 @@ void cal_performance_data(struct acc_option *option, u32 sttime,
 	int i, len;
 	struct timeval end_tvl;
 	double usec;
+	double sum_usec[4];
 
 	get_pid_cpu_time(&ptime, &end_tvl);
 	timersub(&end_tvl, &start_tvl, &end_tvl);
@@ -409,6 +411,15 @@ void cal_performance_data(struct acc_option *option, u32 sttime,
 	ACC_TST_PRT("algname:	length:		perf:		iops:		CPU_rate:\n"
 			"%s	%uBytes	%.1fKB/s	%.1fKops 	%.2f%%\n",
 			palgname, option->pktlen, performance, ops, cpu_rate);
+	sum_usec[0] = (double)(tvsum[0].tv_sec * 1000 * 1000 + tvsum[0].tv_usec);
+	sum_usec[1] = (double)(tvsum[1].tv_sec * 1000 * 1000 + tvsum[1].tv_usec);
+	sum_usec[2] = (double)(tvsum[2].tv_sec * 1000 * 1000 + tvsum[2].tv_usec);
+	sum_usec[3] = (double)(tvsum[3].tv_sec * 1000 * 1000 + tvsum[3].tv_usec);
+	ACC_TST_PRT("duty cycle:%.2f%%, %.2f%%, %.2f%%, %.2f%%\n",
+			(double)sum_usec[0] * 100 / usec / option->threads,
+			(double)sum_usec[1] * 100 / usec / option->threads,
+			(double)sum_usec[2] * 100 / usec / option->threads,
+			(double)sum_usec[3] * 100 / usec / option->threads);
 }
 
 static int benchmark_run(struct acc_option *option)
