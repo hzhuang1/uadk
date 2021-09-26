@@ -468,7 +468,9 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	struct sched_key key;
 	int msg_id, ret;
 	__u32 idx;
+	struct timeval tv1, tv2;
 
+	gettimeofday(&tv1, NULL);
 	ret = wd_cipher_check_params(h_sess, req, CTX_MODE_ASYNC);
 	if (unlikely(ret)) {
 		WD_ERR("failed to check cipher params!\n");
@@ -487,8 +489,12 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 
 	ctx = config->ctxs + idx;
 
+	gettimeofday(&tv2, NULL);
+	timersub(&tv2, &tv1, &req->tv[0]);
 	msg_id = wd_get_msg_from_pool(&wd_cipher_setting.pool, idx,
 				   (void **)&msg);
+	gettimeofday(&tv1, NULL);
+	timersub(&tv1, &tv2, &req->tv[1]);
 	if (unlikely(msg_id < 0)) {
 		WD_ERR("busy, failed to get msg from pool!\n");
 		return -WD_EBUSY;
@@ -497,8 +503,13 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	fill_request_msg(msg, req, sess);
 	msg->tag = msg_id;
 	msg->is_polled = 0;
+	gettimeofday(&tv2, NULL);
+	timersub(&tv2, &tv1, &req->tv[2]);
+	timerclear(&req->tv[3]);
 
 	ret = wd_cipher_setting.driver->cipher_send(ctx->ctx, msg);
+	gettimeofday(&tv1, NULL);
+	timersub(&tv1, &tv2, &req->tv[3]);
 	if (unlikely(ret < 0)) {
 		if (ret != -WD_EBUSY)
 			WD_ERR("wd cipher async send err!\n");
