@@ -40,7 +40,8 @@ typedef struct uadk_thread_res {
 #define MAX_IVK_LENTH		64
 #define DEF_IVK_DATA		0xAA
 #define MAX_TRY_CNT		5000
-#define SEND_USLEEP		100
+//#define SEND_USLEEP		100
+#define SEND_USLEEP		10
 
 static struct wd_ctx_config g_ctx_cfg;
 static struct wd_sched *g_sched;
@@ -609,6 +610,7 @@ static void *sec_uadk_async_run(void *arg)
 	u32 count = 0;
 	int ret, i = 0;
 	struct timeval tv[8] = {0};
+	int sleep_time = SEND_USLEEP * g_thread_num >> 1;
 
 	if (pdata->td_id > g_thread_num)
 		return NULL;
@@ -662,7 +664,8 @@ static void *sec_uadk_async_run(void *arg)
 			timeradd(&pdata->tvsum[2], &creq.tv[2], &pdata->tvsum[2]);
 			timeradd(&pdata->tvsum[3], &creq.tv[3], &pdata->tvsum[3]);
 			if (ret < 0) {
-				usleep(SEND_USLEEP * try_cnt);
+				//usleep(SEND_USLEEP * try_cnt);
+				usleep(sleep_time);
 				try_cnt++;
 				if (try_cnt > MAX_TRY_CNT) {
 					SEC_TST_PRT("Test cipher send fail %d times!\n", MAX_TRY_CNT);

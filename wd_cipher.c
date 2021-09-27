@@ -481,6 +481,7 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	key.type = 0;
 	key.numa_id = sess->numa;
 
+#if 1
 	idx = wd_cipher_setting.sched.pick_next_ctx(
 		     wd_cipher_setting.sched.h_sched_ctx, req, &key);
 	ret = wd_check_ctx(config, CTX_MODE_ASYNC, idx);
@@ -496,9 +497,35 @@ int wd_do_cipher_async(handle_t h_sess, struct wd_cipher_req *req)
 	gettimeofday(&tv1, NULL);
 	timersub(&tv1, &tv2, &req->tv[1]);
 	if (unlikely(msg_id < 0)) {
+		WD_ERR("sess:0x%llx, retry ctx:%d\n", h_sess, idx);
+		//WD_ERR("busy, failed to get msg from pool!\n");
+		return -WD_EBUSY;
+	} else
+		WD_ERR("sess:0x%llx, ctx:%d\n", h_sess, idx);
+#else
+	int retry;
+	retry = config->ctx_num;
+	do {
+		idx = wd_cipher_setting.sched.pick_next_ctx(
+			     wd_cipher_setting.sched.h_sched_ctx, req, &key);
+		ret = wd_check_ctx(config, CTX_MODE_ASYNC, idx);
+		if (ret)
+			return ret;
+		
+		ctx = config->ctxs + idx;
+		
+		gettimeofday(&tv2, NULL);
+		timersub(&tv2, &tv1, &req->tv[0]);
+		msg_id = wd_get_msg_from_pool(&wd_cipher_setting.pool, idx,
+					   (void **)&msg);
+		gettimeofday(&tv1, NULL);
+		timersub(&tv1, &tv2, &req->tv[1]);
+	} while ((msg_id < 0) && (--retry > 0));
+	if (unlikely(msg_id < 0)) {
 		WD_ERR("busy, failed to get msg from pool!\n");
 		return -WD_EBUSY;
 	}
+#endif
 
 	fill_request_msg(msg, req, sess);
 	msg->tag = msg_id;

@@ -25,6 +25,7 @@ struct msg_pool {
 	__u32 msg_size;
 	int head;
 	int tail;
+	__u32 last;
 };
 
 /* parse wd env begin */
@@ -163,6 +164,7 @@ static int init_msg_pool(struct msg_pool *pool, __u32 msg_num, __u32 msg_size)
 	pool->msg_num = msg_num;
 	pool->head = 0;
 	pool->tail = 0;
+	pool->last = 0;
 
 	return 0;
 }
@@ -228,6 +230,7 @@ void *wd_find_msg_in_pool(struct wd_async_msg_pool *pool, int index, __u32 tag)
 	return p->msgs + p->msg_size * (tag - 1);
 }
 
+#if 0
 int wd_get_msg_from_pool(struct wd_async_msg_pool *pool, int index, void **msg)
 {
 	struct msg_pool *p;
@@ -250,6 +253,33 @@ int wd_get_msg_from_pool(struct wd_async_msg_pool *pool, int index, void **msg)
 
 	return idx + 1;
 }
+#else
+int wd_get_msg_from_pool(struct wd_async_msg_pool *pool, int index, void **msg)
+{
+	struct msg_pool *p;
+	__u32 msg_num = pool->pools[index].msg_num;
+	__u32 msg_size;
+	int cnt = 0;
+	int idx = 0;
+
+	p = &pool->pools[index];
+	msg_size = p->msg_size;
+	idx = __atomic_load_n(&p->last, __ATOMIC_ACQUIRE);
+
+	while (__atomic_test_and_set(&p->used[idx], __ATOMIC_ACQUIRE)) {
+		idx = __atomic_load_n(&p->last, __ATOMIC_ACQUIRE);
+		idx = (idx + 1) % msg_num;
+		cnt++;
+		if (cnt == msg_num)
+			return -WD_EBUSY;
+	}
+
+	__atomic_store_n(&p->last, idx, __ATOMIC_RELEASE);
+	*msg = p->msgs + msg_size * idx;
+
+	return idx + 1;
+}
+#endif
 
 void wd_put_msg_to_pool(struct wd_async_msg_pool *pool, int index, __u32 tag)
 {
